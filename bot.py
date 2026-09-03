@@ -15,10 +15,16 @@ Comandi riservati agli amministratori (elencati in admins.txt):
                          - inserisce un nuovo cittadino (data automatica)
     /rimuovi <ID_cittadino>
                          - rimuove il cittadino con quell'ID cittadino
+    /modifica <ID_cittadino> <campo> <nuovo valore>
+                         - modifica nome, cognome, username o ID Telegram
+                           di un cittadino esistente. Campo può essere:
+                           nome, cognome, username, id
 
-Le richieste di cittadinanza inviate con /richiedi vengono notificate nella
-stessa chat con due pulsanti (Accetta / Rifiuta) che solo gli amministratori
-possono usare.
+Le richieste di cittadinanza inviate con /richiedi vengono notificate in
+privato (messaggio diretto) a ciascun amministratore, con due pulsanti
+(Accetta / Rifiuta). NOTA: perché un admin possa ricevere il messaggio
+privato, deve aver avviato almeno una volta una chat con il bot (es.
+premendo /start in privato) — è una limitazione di Telegram, non del bot.
 
 Avvio:
     python3 bot.py
@@ -27,6 +33,7 @@ direttamente in fondo al file, vedi sezione __main__).
 """
 
 import io
+import json
 import logging
 import os
 import sqlite3
@@ -39,6 +46,7 @@ from telegram import (
     Update,
     InputFile,
 )
+from telegram.error import Forbidden, TelegramError
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -98,7 +106,8 @@ def init_db() -> None:
                 stato           TEXT NOT NULL DEFAULT 'in_attesa',
                 admin_id        INTEGER,
                 admin_username  TEXT,
-                data_gestione   TEXT
+                data_gestione   TEXT,
+                notifiche       TEXT
             )
             """
         )
@@ -352,6 +361,135 @@ async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+# Campi modificabili con /modifica: alias accettati -> colonna reale in DB
+CAMPI_MODIFICABILI = {
+    "nome": "nome",
+    "cognome": "cognome",
+    "username": "username",
+    "id": "telegram_id",
+    "id_telegram": "telegram_id",
+    "telegram_id": "telegram_id",
+}
+
+
+async def cmd_modifica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text(
+            "Non sei autorizzato a usare questo comando."
+        )
+        return
+
+    # Testo dopo il comando, es: "21 cognome Di Marco"
+    raw_text = update.message.text.partition(" ")[2].strip()
+    if not raw_text:
+        await update.message.reply_text(
+            "Uso corretto: /modifica <ID_cittadino> <campo> <nuovo valore>\n\n"
+            "Campi disponibili: nome, cognome, username, id (ID Telegram)\n\n"
+            "Esempi:\n"
+            "/modifica 13 username @nuovousername\n"
+            "/modifica 21 cognome Di Marco\n"
+            "/modifica 5 id 987654321"
+        )
+        return
+
+    # maxsplit=2: separa ID, campo, e il resto (che può contenere spazi,
+    # necessario per nomi/cognomi composti come "Di Marco")
+    pezzi = raw_text.split(maxsplit=2)
+    if len(pezzi) != 3:
+        await update.message.reply_text(
+            "Formato non valido. Uso corretto:\n"
+            "/modifica <ID_cittadino> <campo> <nuovo valore>\n\n"
+            "Esempio: /modifica 21 cognome Di Marco"
+        )
+        return
+
+    citizen_id_str, campo_raw, nuovo_valore = pezzi
+
+    if not citizen_id_str.isdigit():
+        await update.message.reply_text("L'ID cittadino deve essere un numero intero.")
+        return
+    citizen_id = int(citizen_id_str)
+
+    campo_key = campo_raw.strip().lower()
+    if campo_key not in CAMPI_MODIFICABILI:
+        campi_lista = ", ".join(sorted(set(CAMPI_MODIFICABILI.values())))
+        await update.message.reply_text(
+            f"Campo «{campo_raw}» non riconosciuto.\n"
+            f"Campi disponibili: nome, cognome, username, id (ID Telegram)"
+        )
+        return
+    colonna = CAMPI_MODIFICABILI[campo_key]
+
+    nuovo_valore = nuovo_valore.strip()
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM cittadini WHERE citizen_id = ?", (citizen_id,)
+        ).fetchone()
+        if not row:
+            await update.message.reply_text(
+                f"Nessun cittadino trovato con ID #{citizen_id}."
+            )
+            return
+
+        # Validazioni specifiche per campo
+        if colonna == "telegram_id":
+            if not nuovo_valore.isdigit():
+                await update.message.reply_text(
+                    "Il nuovo ID Telegram deve essere un numero intero."
+                )
+                return
+            nuovo_valore_db = int(nuovo_valore)
+
+            # Evita di assegnare a due cittadini lo stesso ID Telegram
+            duplicato = conn.execute(
+                "SELECT citizen_id FROM cittadini WHERE telegram_id = ? AND citizen_id != ?",
+                (nuovo_valore_db, citizen_id),
+            ).fetchone()
+            if duplicato:
+                await update.message.reply_text(
+                    f"Questo ID Telegram è già assegnato al cittadino "
+                    f"#{duplicato['citizen_id']}."
+                )
+                return
+
+        elif colonna == "username":
+            pulito = nuovo_valore.lstrip("@").strip()
+            # Permette di rimuovere l'username scrivendo "-"
+            nuovo_valore_db = None if pulito in ("", "-") else pulito
+
+        else:  # nome o cognome
+            if not nuovo_valore:
+                await update.message.reply_text(
+                    f"Il nuovo {campo_key} non può essere vuoto."
+                )
+                return
+            nuovo_valore_db = nuovo_valore
+
+        valore_precedente = row[colonna]
+
+        conn.execute(
+            f"UPDATE cittadini SET {colonna} = ? WHERE citizen_id = ?",
+            (nuovo_valore_db, citizen_id),
+        )
+        conn.commit()
+
+    def fmt(v):
+        if v is None:
+            return "(nessuno)"
+        if colonna == "username":
+            return f"@{v}"
+        return str(v)
+
+    await update.message.reply_text(
+        f"Cittadino #{citizen_id} aggiornato.\n"
+        f"Campo: {campo_key}\n"
+        f"Valore precedente: {fmt(valore_precedente)}\n"
+        f"Nuovo valore: {fmt(nuovo_valore_db)}"
+    )
+
+
 # ----------------------------------------------------------------------
 # Comando di aiuto
 # ----------------------------------------------------------------------
@@ -365,7 +503,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/richiedi nome, cognome — invia una richiesta di cittadinanza\n\n"
         "Comandi amministratore:\n"
         "/inserisci ID, username, nome, cognome\n"
-        "/rimuovi ID_cittadino"
+        "/rimuovi ID_cittadino\n"
+        "/modifica ID_cittadino campo nuovo_valore"
     )
     await update.message.reply_text(text)
 
@@ -446,13 +585,93 @@ async def cmd_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ]
         ]
     )
-    await update.message.reply_text(
+    testo_notifica = (
         f"📋 Nuova richiesta di cittadinanza #{request_id}\n"
         f"Da: {richiedente}\n"
         f"Nome: {nome} {cognome}\n\n"
-        "Un amministratore può accettarla o rifiutarla con i pulsanti qui sotto.",
-        reply_markup=keyboard,
+        "Puoi accettarla o rifiutarla con i pulsanti qui sotto."
     )
+
+    admin_ids = load_admin_ids()
+    if not admin_ids:
+        logger.warning(
+            "Nessun amministratore trovato in admins.txt: la richiesta #%s "
+            "non è stata notificata a nessuno.",
+            request_id,
+        )
+
+    admin_non_raggiungibili = []
+    notifiche_inviate = []  # lista di [chat_id, message_id] per poterle aggiornare dopo
+    for admin_id in admin_ids:
+        try:
+            sent_msg = await context.bot.send_message(
+                chat_id=admin_id,
+                text=testo_notifica,
+                reply_markup=keyboard,
+            )
+            notifiche_inviate.append([sent_msg.chat_id, sent_msg.message_id])
+        except Forbidden:
+            # L'admin non ha mai avviato una chat privata con il bot
+            admin_non_raggiungibili.append(admin_id)
+            logger.warning(
+                "Impossibile notificare l'admin %s: deve avviare prima una "
+                "chat privata con il bot (/start).",
+                admin_id,
+            )
+        except TelegramError as exc:
+            admin_non_raggiungibili.append(admin_id)
+            logger.warning("Errore inviando la notifica all'admin %s: %s", admin_id, exc)
+
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE richieste SET notifiche = ? WHERE request_id = ?",
+            (json.dumps(notifiche_inviate), request_id),
+        )
+        conn.commit()
+
+    if admin_non_raggiungibili and update.effective_chat.type != "private":
+        # Avvisa nella chat del gruppo che alcuni admin non sono raggiungibili,
+        # così qualcuno può sollecitarli ad avviare il bot in privato.
+        await update.message.reply_text(
+            "⚠️ Attenzione: non sono riuscito a notificare in privato "
+            f"{len(admin_non_raggiungibili)} amministratore/i. Devono prima "
+            "avviare una chat privata con il bot (premendo /start in privato) "
+            "per poter ricevere le notifiche delle richieste."
+        )
+
+
+async def _aggiorna_notifiche_admin(
+    context: ContextTypes.DEFAULT_TYPE,
+    notifiche_json: str | None,
+    testo_finale: str,
+    skip_chat_message: tuple[int, int] | None = None,
+) -> None:
+    """Aggiorna (o rimuove i pulsanti da) tutti i messaggi di notifica inviati
+    agli admin per una richiesta, così tutti vedono l'esito e non solo chi ha
+    cliccato. skip_chat_message evita di modificare due volte lo stesso
+    messaggio se è già stato aggiornato con edit_message_text sulla query."""
+    if not notifiche_json:
+        return
+    try:
+        notifiche = json.loads(notifiche_json)
+    except (ValueError, TypeError):
+        return
+
+    for chat_id, message_id in notifiche:
+        if skip_chat_message and (chat_id, message_id) == skip_chat_message:
+            continue
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=testo_finale,
+                reply_markup=InlineKeyboardMarkup([]),
+            )
+        except TelegramError as exc:
+            logger.warning(
+                "Impossibile aggiornare la notifica in chat %s (msg %s): %s",
+                chat_id, message_id, exc,
+            )
 
 
 async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -491,6 +710,7 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
         admin_username = f"@{clicking_user.username}" if clicking_user.username else clicking_user.full_name
         data_gestione = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_chat_msg = (query.message.chat_id, query.message.message_id)
 
         if azione == "accetta":
             # Doppio controllo: potrebbe essere già cittadino nel frattempo
@@ -512,9 +732,13 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.answer(
                     "Questo utente è già cittadino, richiesta annullata.", show_alert=True
                 )
-                await query.edit_message_text(
+                testo_finale = (
                     f"⚠️ Richiesta #{request_id} annullata: {row['nome']} {row['cognome']} "
                     f"risultava già cittadino (#{already_citizen['citizen_id']})."
+                )
+                await query.edit_message_text(testo_finale, reply_markup=InlineKeyboardMarkup([]))
+                await _aggiorna_notifiche_admin(
+                    context, row["notifiche"], testo_finale, skip_chat_message=current_chat_msg
                 )
                 return
 
@@ -538,10 +762,26 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
             conn.commit()
 
             await query.answer("Richiesta accettata!")
-            await query.edit_message_text(
+            testo_finale = (
                 f"✅ Richiesta #{request_id} accettata da {admin_username}.\n"
                 f"{row['nome']} {row['cognome']} è ora cittadino #{new_citizen_id}."
             )
+            await query.edit_message_text(testo_finale, reply_markup=InlineKeyboardMarkup([]))
+            await _aggiorna_notifiche_admin(
+                context, row["notifiche"], testo_finale, skip_chat_message=current_chat_msg
+            )
+
+            # Avvisa anche il richiedente, se possibile
+            try:
+                await context.bot.send_message(
+                    chat_id=row["telegram_id"],
+                    text=(
+                        f"🎉 La tua richiesta di cittadinanza è stata accettata!\n"
+                        f"Sei ora cittadino #{new_citizen_id}."
+                    ),
+                )
+            except TelegramError:
+                pass
 
         elif azione == "rifiuta":
             conn.execute(
@@ -555,10 +795,23 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
             conn.commit()
 
             await query.answer("Richiesta rifiutata.")
-            await query.edit_message_text(
+            testo_finale = (
                 f"❌ Richiesta #{request_id} rifiutata da {admin_username}.\n"
                 f"{row['nome']} {row['cognome']}"
             )
+            await query.edit_message_text(testo_finale, reply_markup=InlineKeyboardMarkup([]))
+            await _aggiorna_notifiche_admin(
+                context, row["notifiche"], testo_finale, skip_chat_message=current_chat_msg
+            )
+
+            # Avvisa anche il richiedente, se possibile
+            try:
+                await context.bot.send_message(
+                    chat_id=row["telegram_id"],
+                    text="Purtroppo la tua richiesta di cittadinanza è stata rifiutata.",
+                )
+            except TelegramError:
+                pass
 
         else:
             await query.answer("Azione non riconosciuta.", show_alert=True)
@@ -570,7 +823,6 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 def main() -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    
     if not token:
         raise RuntimeError(
             "Imposta la variabile d'ambiente TELEGRAM_BOT_TOKEN con il token "
@@ -587,6 +839,7 @@ def main() -> None:
     application.add_handler(CommandHandler("richiedi", cmd_richiedi))
     application.add_handler(CommandHandler("inserisci", cmd_inserisci))
     application.add_handler(CommandHandler("rimuovi", cmd_rimuovi))
+    application.add_handler(CommandHandler("modifica", cmd_modifica))
     application.add_handler(CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:"))
 
     logger.info("Bot avviato, in ascolto...")
