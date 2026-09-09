@@ -60,6 +60,8 @@ from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters
 )
 
 # ----------------------------------------------------------------------
@@ -244,17 +246,17 @@ def format_row(row: sqlite3.Row) -> str:
     )
 
 # ----------------------------------------------------------------------
-# Post init
+# Menù nativo di Telegram
 # ----------------------------------------------------------------------
 
 async def post_init(application: Application) -> None:
     # Definiamo i comandi pubblici visibili a tutti nel menu nativo di Telegram
     comandi_pubblici = [
-        BotCommand("help", "Pulsantiera dei comandi"),
         BotCommand("elenco", "Mostra l'elenco completo dei cittadini"),
         BotCommand("esporta", "Esporta il registro in formato Markdown"),
         BotCommand("cerca", "Cerca un cittadino per nome/cognome/username"),
         BotCommand("richiedi", "Richiedi la cittadinanza"),
+        BotCommand("help", "Aiuto con i comandi"),
     ]
     # Imposta i comandi globalmente
     await application.bot.set_my_commands(comandi_pubblici)
@@ -540,12 +542,12 @@ async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    # Il testo dopo il comando, es: "123456789, mariorossi, Mario, Rossi"
+    # Il testo dopo il comando, es: "123456789, @mariorossi, Mario, Rossi"
     raw_text = update.message.text.partition(" ")[2].strip()
     if not raw_text:
         await update.message.reply_text(
             "Uso corretto:\n/inserisci ID_telegram, username, nome, cognome\n\n"
-            "Esempio:\n/inserisci 123456789, mariorossi, Mario, Rossi"
+            "Esempio:\n/inserisci 123456789, @mariorossi, Mario, Rossi"
         )
         return
 
@@ -1049,7 +1051,7 @@ async def on_cmd_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     elif cmd == "richiedi":
         await query.message.reply_text("📝 *Uso del comando:*\n`/richiedi <nome>, <cognome>`\n\n_Esempio:_ `/richiedi Mario, Rossi`", parse_mode="Markdown")
     elif cmd == "inserisci":
-        await query.message.reply_text("➕ *Uso del comando:*\n`/inserisci ID_telegram, username, nome, cognome`\n\n_Esempio:_ `/inserisci 123456789, mariorossi, Mario, Rossi`", parse_mode="Markdown")
+        await query.message.reply_text("➕ *Uso del comando:*\n`/inserisci ID_telegram, username, nome, cognome`\n\n_Esempio:_ `/inserisci 123456789, @mariorossi, Mario, Rossi`", parse_mode="Markdown")
     elif cmd == "rimuovi":
         await query.message.reply_text("❌ *Uso del comando:*\n`/rimuovi <ID_cittadino>`\n\n_Esempio:_ `/rimuovi 12`", parse_mode="Markdown")
     elif cmd == "aggiungi_admin":
@@ -1073,6 +1075,7 @@ def main() -> None:
 
     application = Application.builder().token(token).post_init(post_init).build()
 
+    # 1. Comandi specifici
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("esporta", cmd_esporta))
@@ -1084,8 +1087,13 @@ def main() -> None:
     application.add_handler(CommandHandler("aggiungi_admin", cmd_aggiungi_admin))
     application.add_handler(CommandHandler("rimuovi_admin", cmd_rimuovi_admin))
     application.add_handler(CommandHandler("elenco_admin", cmd_elenco_admin))
+
+    # 2. Callback handlers
     application.add_handler(CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:"))
-    application.add_handler(CallbackQueryHandler(on_cmd_button_callback, pattern=r"^cmd_btn:")) # <--- Nuovo
+    application.add_handler(CallbackQueryHandler(on_cmd_button_callback, pattern=r"^cmd_btn:")) 
+
+    # 3. HANDLER CATCH-ALL
+    application.add_handler(MessageHandler(filters.TEXT | filters.COMMAND, cmd_help))
     
 
     logger.info("Bot avviato, in ascolto...")
