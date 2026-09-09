@@ -48,8 +48,11 @@ from pathlib import Path
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
     Update,
     InputFile,
+    BotCommand
 )
 from telegram.error import Forbidden, TelegramError
 from telegram.ext import (
@@ -240,6 +243,22 @@ def format_row(row: sqlite3.Row) -> str:
         f"({username}) — cittadino dal {row['data_acquisizione']}"
     )
 
+# ----------------------------------------------------------------------
+# Post init
+# ----------------------------------------------------------------------
+
+async def post_init(application: Application) -> None:
+    # Definiamo i comandi pubblici visibili a tutti nel menu nativo di Telegram
+    comandi_pubblici = [
+        BotCommand("help", "Pulsantiera dei comandi"),
+        BotCommand("elenco", "Mostra l'elenco completo dei cittadini"),
+        BotCommand("esporta", "Esporta il registro in formato Markdown"),
+        BotCommand("cerca", "Cerca un cittadino per nome/cognome/username"),
+        BotCommand("richiedi", "Richiedi la cittadinanza"),
+    ]
+    # Imposta i comandi globalmente
+    await application.bot.set_my_commands(comandi_pubblici)
+
 
 # ----------------------------------------------------------------------
 # Comandi pubblici
@@ -288,7 +307,7 @@ async def cmd_esporta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     file_obj = io.BytesIO(md_bytes)
     file_obj.name = "registro_cittadini.md"
 
-    await update.message.reply_document(
+    await update.effective_message.reply_document(
         document=InputFile(file_obj, filename="registro_cittadini.md"),
         caption=f"Registro cittadini — {len(rows)} cittadini totali.",
     )
@@ -345,7 +364,7 @@ async def cmd_elenco(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         blocchi.append("\n".join(blocco_corrente))
 
     for blocco in blocchi:
-        await update.message.reply_text(blocco, parse_mode="MarkdownV2")
+        await update.effective_message.reply_text(blocco, parse_mode="MarkdownV2")
 
 
 async def cmd_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -508,7 +527,7 @@ async def cmd_elenco_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         ruolo = "root" if admin_id == ROOT_ADMIN_ID else "admin"
         righe.append(f"• {admin_id} — {ruolo}")
 
-    await update.message.reply_text(
+    await update.effective_message.reply_text(
         "👮 Elenco amministratori\n\n" + "\n".join(righe)
     )
 
@@ -627,7 +646,8 @@ async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "Bot del registro cittadini.\n\n"
-        "Comandi disponibili per tutti:\n"
+        "Comandi disponibili per tutti:\n\n" \
+        "/help — mostra la pulsantiera dei comandi\n\n"
         "/esporta — invia l'elenco completo come file Markdown\n"
         "/elenco — invia l'elenco completo come messaggio (nome, cognome, username)\n"
         "/cerca <testo> — cerca per nome, cognome o username\n"
@@ -952,6 +972,92 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 # ----------------------------------------------------------------------
+# Comando /help con pulsantiera inline
+# ----------------------------------------------------------------------
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    # Comandi pubblici per tutti
+    keyboard = [
+        [
+            InlineKeyboardButton("👥 Elenco", callback_data="cmd_btn:elenco"),
+            InlineKeyboardButton("📥 Esporta", callback_data="cmd_btn:esporta"),
+        ],
+        [
+            InlineKeyboardButton("🔍 Cerca", callback_data="cmd_btn:cerca"),
+            InlineKeyboardButton("📝 Richiedi", callback_data="cmd_btn:richiedi"),
+        ],
+    ]
+
+    # Comandi per Amministratori
+    if is_admin(user_id):
+        keyboard.append([
+            InlineKeyboardButton("➕ Inserisci", callback_data="cmd_btn:inserisci"),
+            InlineKeyboardButton("❌ Rimuovi", callback_data="cmd_btn:rimuovi"),
+        ])
+
+    # Comandi per Root
+    if is_root(user_id):
+        keyboard.append([
+            InlineKeyboardButton("👮 Elenco Admin", callback_data="cmd_btn:elenco_admin"),
+        ])
+        keyboard.append([
+            InlineKeyboardButton("➕ Aggiungi Admin", callback_data="cmd_btn:aggiungi_admin"),
+            InlineKeyboardButton("➖ Rimuovi Admin", callback_data="cmd_btn:rimuovi_admin"),
+        ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    text = (
+        "🏛 *Bot Registro Cittadini — Menu Comandi*\n\n"
+        "Seleziona un comando qui sotto per eseguirlo subito o per vedere le istruzioni di utilizzo:"
+    )
+
+    await update.effective_message.reply_text(
+        text, reply_markup=reply_markup, parse_mode="Markdown"
+    )
+
+
+async def on_cmd_button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Gestisce la pressione dei pulsanti della tastiera del comando /help."""
+    query = update.callback_query
+    await query.answer()
+
+    cmd = query.data.split(":")[1]
+    user_id = query.from_user.id
+
+    # Controlli sicurezza permessi
+    if cmd in ("inserisci", "rimuovi") and not is_admin(user_id):
+        await query.message.reply_text("⛔ Non sei autorizzato a usare questo comando.")
+        return
+    if cmd in ("elenco_admin", "aggiungi_admin", "rimuovi_admin") and not is_root(user_id):
+        await query.message.reply_text("⛔ Comando riservato all'utente root.")
+        return
+
+    # Esecuzione immediata per comandi senza parametri
+    if cmd == "elenco":
+        await cmd_elenco(update, context)
+    elif cmd == "esporta":
+        await cmd_esporta(update, context)
+    elif cmd == "elenco_admin":
+        await cmd_elenco_admin(update, context)
+
+    # Istruzioni d'uso per comandi che richiedono parametri
+    elif cmd == "cerca":
+        await query.message.reply_text("🔍 *Uso del comando:*\n`/cerca <stringa>`\n\n_Esempio:_ `/cerca Mario`", parse_mode="Markdown")
+    elif cmd == "richiedi":
+        await query.message.reply_text("📝 *Uso del comando:*\n`/richiedi <nome>, <cognome>`\n\n_Esempio:_ `/richiedi Mario, Rossi`", parse_mode="Markdown")
+    elif cmd == "inserisci":
+        await query.message.reply_text("➕ *Uso del comando:*\n`/inserisci ID_telegram, username, nome, cognome`\n\n_Esempio:_ `/inserisci 123456789, mariorossi, Mario, Rossi`", parse_mode="Markdown")
+    elif cmd == "rimuovi":
+        await query.message.reply_text("❌ *Uso del comando:*\n`/rimuovi <ID_cittadino>`\n\n_Esempio:_ `/rimuovi 12`", parse_mode="Markdown")
+    elif cmd == "aggiungi_admin":
+        await query.message.reply_text("➕ *Uso del comando:*\n`/aggiungi_admin <ID_telegram>`", parse_mode="Markdown")
+    elif cmd == "rimuovi_admin":
+        await query.message.reply_text("➖ *Uso del comando:*\n`/rimuovi_admin <ID_telegram>`", parse_mode="Markdown")
+
+# ----------------------------------------------------------------------
 # Avvio applicazione
 # ----------------------------------------------------------------------
 
@@ -965,9 +1071,10 @@ def main() -> None:
 
     init_db()
 
-    application = Application.builder().token(token).build()
+    application = Application.builder().token(token).post_init(post_init).build()
 
     application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("help", cmd_help))
     application.add_handler(CommandHandler("esporta", cmd_esporta))
     application.add_handler(CommandHandler("elenco", cmd_elenco))
     application.add_handler(CommandHandler("cerca", cmd_cerca))
@@ -978,6 +1085,8 @@ def main() -> None:
     application.add_handler(CommandHandler("rimuovi_admin", cmd_rimuovi_admin))
     application.add_handler(CommandHandler("elenco_admin", cmd_elenco_admin))
     application.add_handler(CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:"))
+    application.add_handler(CallbackQueryHandler(on_cmd_button_callback, pattern=r"^cmd_btn:")) # <--- Nuovo
+    
 
     logger.info("Bot avviato, in ascolto...")
     application.run_polling()
