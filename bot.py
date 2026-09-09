@@ -12,11 +12,18 @@ Comandi pubblici:
                          - invia una richiesta di cittadinanza (ID e username
                            presi automaticamente dal profilo Telegram)
 
-Comandi riservati agli amministratori (elencati in admins.txt):
+Comandi riservati agli amministratori:
     /inserisci <ID>, <username>, <nome>, <cognome>
                          - inserisce un nuovo cittadino (data automatica)
     /rimuovi <ID_cittadino>
                          - rimuove il cittadino con quell'ID cittadino
+
+Comandi riservati al root:
+    /aggiungi_admin <ID_telegram>
+                         - aggiunge un amministratore
+    /rimuovi_admin <ID_telegram>
+                         - rimuove un amministratore
+    /elenco_admin        - mostra gli amministratori configurati
 
 Le richieste di cittadinanza inviate con /richiedi vengono notificate in
 privato (messaggio diretto) a ciascun amministratore, con due pulsanti
@@ -26,7 +33,7 @@ premendo /start in privato) — è una limitazione di Telegram, non del bot.
 
 Avvio:
     python3 bot.py
-Richiede la variabile d'ambiente TELEGRAM_BOT_TOKEN (o la si può mettere
+Richiede la variabile d'ambiente TOKEN (o la si può mettere
 direttamente in fondo al file, vedi sezione __main__).
 """
 
@@ -59,6 +66,10 @@ from telegram.ext import (
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = BASE_DIR / "registro.db"
 ADMINS_PATH = BASE_DIR / "admins.txt"
+
+# ID Telegram dell'utente root: può gestire l'elenco degli amministratori.
+# Impostare la variabile d'ambiente ROOT_ADMIN_ID.
+ROOT_ADMIN_ID = int(os.environ["ROOT_ADMIN_ID"])
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -141,8 +152,81 @@ def load_admin_ids() -> set[int]:
     return ids
 
 
+def is_root(user_id: int) -> bool:
+    return user_id == ROOT_ADMIN_ID
+
+
 def is_admin(user_id: int) -> bool:
-    return user_id in load_admin_ids()
+    # Il root è sempre admin, anche se non compare in admins.txt.
+    return is_root(user_id) or user_id in load_admin_ids()
+
+
+def add_admin_id(admin_id: int) -> bool:
+    """Aggiunge un ID Telegram ad admins.txt.
+
+    Restituisce True se l'ID è stato aggiunto, False se era già presente.
+    """
+    admin_ids = load_admin_ids()
+    if admin_id in admin_ids:
+        return False
+
+    existing_lines = []
+    if ADMINS_PATH.exists():
+        existing_lines = ADMINS_PATH.read_text(encoding="utf-8").splitlines()
+
+    with ADMINS_PATH.open("a", encoding="utf-8") as f:
+        if existing_lines and not existing_lines[-1].endswith("\n"):
+            # In pratica splitlines() rimuove il newline: aggiungiamo comunque
+            # un newline prima del nuovo ID se il file non termina con uno.
+            raw = ADMINS_PATH.read_text(encoding="utf-8")
+            if raw and not raw.endswith("\n"):
+                f.write("\n")
+        f.write(f"{admin_id}\n")
+
+    return True
+
+
+def remove_admin_id(admin_id: int) -> bool:
+    """Rimuove un ID Telegram da admins.txt.
+
+    Restituisce True se l'ID è stato rimosso, False se non era presente.
+    Il root non può essere rimosso.
+    """
+    if is_root(admin_id):
+        return False
+
+    if not ADMINS_PATH.exists():
+        return False
+
+    lines = ADMINS_PATH.read_text(encoding="utf-8").splitlines()
+    found = False
+    new_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            new_lines.append(line)
+            continue
+
+        try:
+            current_id = int(stripped)
+        except ValueError:
+            new_lines.append(line)
+            continue
+
+        if current_id == admin_id:
+            found = True
+            continue
+
+        new_lines.append(line)
+
+    if found:
+        content = "\n".join(new_lines).rstrip("\n")
+        if content:
+            content += "\n"
+        ADMINS_PATH.write_text(content, encoding="utf-8")
+
+    return found
 
 
 # ----------------------------------------------------------------------
@@ -306,6 +390,129 @@ async def cmd_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 # Comandi amministratore
 # ----------------------------------------------------------------------
 
+async def cmd_aggiungi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    if not is_root(user_id):
+        await update.message.reply_text(
+            "Solo l'utente root può modificare l'elenco degli amministratori."
+        )
+        return
+
+    if not context.args or not context.args[0].lstrip("-").isdigit():
+        await update.message.reply_text(
+            "Uso corretto: /aggiungi_admin <ID_telegram>\n"
+            "Esempio: /aggiungi_admin 123456789"
+        )
+        return
+
+    admin_id = int(context.args[0])
+
+    if admin_id <= 0:
+        await update.message.reply_text("L'ID Telegram deve essere positivo.")
+        return
+
+    if is_root(admin_id):
+        await update.message.reply_text(
+            "Questo ID è già il root e dispone automaticamente dei privilegi di amministratore."
+        )
+        return
+
+    try:
+        added = add_admin_id(admin_id)
+    except OSError as exc:
+        logger.exception("Errore aggiungendo l'admin %s", admin_id)
+        await update.message.reply_text(
+            f"Errore durante il salvataggio dell'amministratore: {exc}"
+        )
+        return
+
+    if not added:
+        await update.message.reply_text(
+            f"L'ID Telegram {admin_id} è già un amministratore."
+        )
+        return
+
+    await update.message.reply_text(
+        f"✅ ID Telegram {admin_id} aggiunto agli amministratori."
+    )
+
+
+async def cmd_rimuovi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    if not is_root(user_id):
+        await update.message.reply_text(
+            "Solo l'utente root può modificare l'elenco degli amministratori."
+        )
+        return
+
+    if not context.args or not context.args[0].lstrip("-").isdigit():
+        await update.message.reply_text(
+            "Uso corretto: /rimuovi_admin <ID_telegram>\n"
+            "Esempio: /rimuovi_admin 123456789"
+        )
+        return
+
+    admin_id = int(context.args[0])
+
+    if admin_id <= 0:
+        await update.message.reply_text("L'ID Telegram deve essere positivo.")
+        return
+
+    if is_root(admin_id):
+        await update.message.reply_text(
+            "Il root non può essere rimosso dall'elenco degli amministratori."
+        )
+        return
+
+    try:
+        removed = remove_admin_id(admin_id)
+    except OSError as exc:
+        logger.exception("Errore rimuovendo l'admin %s", admin_id)
+        await update.message.reply_text(
+            f"Errore durante il salvataggio dell'elenco amministratori: {exc}"
+        )
+        return
+
+    if not removed:
+        await update.message.reply_text(
+            f"L'ID Telegram {admin_id} non risulta nell'elenco degli amministratori."
+        )
+        return
+
+    await update.message.reply_text(
+        f"✅ ID Telegram {admin_id} rimosso dagli amministratori."
+    )
+
+
+async def cmd_elenco_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+
+    if not is_root(user_id):
+        await update.message.reply_text(
+            "Solo l'utente root può visualizzare l'elenco degli amministratori."
+        )
+        return
+
+    admin_ids = load_admin_ids()
+    # Il root è sempre incluso, senza necessità di inserirlo in admins.txt.
+    all_admin_ids = sorted(admin_ids | {ROOT_ADMIN_ID})
+
+    if not all_admin_ids:
+        await update.message.reply_text("Non ci sono amministratori configurati.")
+        return
+
+    righe = []
+    for admin_id in all_admin_ids:
+        ruolo = "root" if admin_id == ROOT_ADMIN_ID else "admin"
+        righe.append(f"• {admin_id} — {ruolo}")
+
+    await update.message.reply_text(
+        "👮 Elenco amministratori\n\n" + "\n".join(righe)
+    )
+
+
 async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     if not is_admin(user_id):
@@ -427,7 +634,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "/richiedi nome, cognome — invia una richiesta di cittadinanza\n\n"
         "Comandi amministratore:\n"
         "/inserisci ID, username, nome, cognome\n"
-        "/rimuovi ID_cittadino"
+        "/rimuovi ID_cittadino\n\n"
+        "Comandi root (gestione amministratori):\n"
+        "/aggiungi_admin ID_telegram\n"
+        "/rimuovi_admin ID_telegram\n"
+        "/elenco_admin"
     )
     await update.message.reply_text(text)
 
@@ -745,10 +956,10 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
 # ----------------------------------------------------------------------
 
 def main() -> None:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    token = os.environ.get("TOKEN")
     if not token:
         raise RuntimeError(
-            "Imposta la variabile d'ambiente TELEGRAM_BOT_TOKEN con il token "
+            "Imposta la variabile d'ambiente TOKEN con il token "
             "ottenuto da BotFather prima di avviare il bot."
         )
 
@@ -763,6 +974,9 @@ def main() -> None:
     application.add_handler(CommandHandler("richiedi", cmd_richiedi))
     application.add_handler(CommandHandler("inserisci", cmd_inserisci))
     application.add_handler(CommandHandler("rimuovi", cmd_rimuovi))
+    application.add_handler(CommandHandler("aggiungi_admin", cmd_aggiungi_admin))
+    application.add_handler(CommandHandler("rimuovi_admin", cmd_rimuovi_admin))
+    application.add_handler(CommandHandler("elenco_admin", cmd_elenco_admin))
     application.add_handler(CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:"))
 
     logger.info("Bot avviato, in ascolto...")
