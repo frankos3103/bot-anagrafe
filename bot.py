@@ -239,8 +239,8 @@ def remove_admin_id(admin_id: int) -> bool:
 def format_row(row: sqlite3.Row) -> str:
     username = f"@{row['username']}" if row["username"] else "(nessuno username)"
     return (
-        f"#{row['citizen_id']} — {row['nome']} {row['cognome']} "
-        f"({username}) — cittadino dal {row['data_acquisizione']}"
+        f"#{row['citizen_id']} — {row['telegram_id']} — {row['nome']} {row['cognome']} "
+        f"({username})"
     )
 
 # ----------------------------------------------------------------------
@@ -286,19 +286,19 @@ async def cmd_esporta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         "",
         f"Totale cittadini: {len(rows)}",
         "",
-        "| ID cittadino | ID Telegram | Username | Nome | Cognome | Data acquisizione |",
-        "|---|---|---|---|---|---|",
+        "| ID cittadino | ID Telegram | Username | Nome | Cognome |",
+        "|---|---|---|---|---|",
     ]
     for row in rows:
         username = f"@{row['username']}" if row["username"] else ""
         lines.append(
-            "| {citizen_id} | {telegram_id} | {username} | {nome} | {cognome} | {data} |".format(
+            "| {citizen_id} | {telegram_id} | {username} | {nome} | {cognome} |".format(
                 citizen_id=row["citizen_id"],
                 telegram_id=row["telegram_id"],
                 username=_md_escape(username),
                 nome=_md_escape(row["nome"]),
                 cognome=_md_escape(row["cognome"]),
-                data=row["data_acquisizione"],
+                #data=row["data_acquisizione"],
             )
         )
 
