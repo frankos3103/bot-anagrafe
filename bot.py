@@ -3,7 +3,9 @@
 Bot Telegram per la gestione del registro cittadini di una simulazione politica.
 
 Comandi pubblici:
-    /lista              - invia l'elenco di tutti i cittadini in formato Markdown
+    /esporta             - invia l'elenco di tutti i cittadini come file Markdown
+    /elenco              - invia l'elenco di tutti i cittadini come messaggio
+                           formattato (solo nome, cognome, username)
     /cerca <stringa>     - mostra i cittadini che contengono la stringa
                            nel nome, cognome o username
     /richiedi <nome>, <cognome>
@@ -15,10 +17,6 @@ Comandi riservati agli amministratori (elencati in admins.txt):
                          - inserisce un nuovo cittadino (data automatica)
     /rimuovi <ID_cittadino>
                          - rimuove il cittadino con quell'ID cittadino
-    /modifica <ID_cittadino> <campo> <nuovo valore>
-                         - modifica nome, cognome, username o ID Telegram
-                           di un cittadino esistente. Campo può essere:
-                           nome, cognome, username, id
 
 Le richieste di cittadinanza inviate con /richiedi vengono notificate in
 privato (messaggio diretto) a ciascun amministratore, con due pulsanti
@@ -170,7 +168,7 @@ def _md_escape(value: str) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
 
 
-async def cmd_lista(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_esporta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     with get_connection() as conn:
         rows = conn.execute(
             "SELECT * FROM cittadini ORDER BY citizen_id ASC"
@@ -210,6 +208,60 @@ async def cmd_lista(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         document=InputFile(file_obj, filename="registro_cittadini.md"),
         caption=f"Registro cittadini — {len(rows)} cittadini totali.",
     )
+
+
+def _escape_markdown_v2(value: str) -> str:
+    """Sfugge i caratteri speciali richiesti da Telegram in modalità MarkdownV2."""
+    if value is None:
+        return ""
+    caratteri_speciali = r"_*[]()~`>#+-=|{}.!"
+    testo = str(value)
+    for ch in caratteri_speciali:
+        testo = testo.replace(ch, f"\\{ch}")
+    return testo
+
+
+async def cmd_elenco(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM cittadini ORDER BY nome ASC, cognome ASC"
+        ).fetchall()
+
+    if not rows:
+        await update.message.reply_text("Il registro è vuoto.")
+        return
+
+    righe_cittadini = []
+    for row in rows:
+        username = (
+            f"@{_escape_markdown_v2(row['username'])}"
+            if row["username"]
+            else "_\\(nessuno username\\)_"
+        )
+        nome = _escape_markdown_v2(row["nome"])
+        cognome = _escape_markdown_v2(row["cognome"])
+        righe_cittadini.append(f"• *{nome} {cognome}* — {username}")
+
+    intestazione = f"👥 *Elenco cittadini* \\({len(rows)}\\)"
+    LIMITE = 3800  # margine di sicurezza sotto il limite di 4096 di Telegram
+
+    blocchi = []
+    blocco_corrente = [intestazione]
+    lunghezza_corrente = len(intestazione)
+
+    for riga in righe_cittadini:
+        if lunghezza_corrente + len(riga) + 1 > LIMITE:
+            blocchi.append("\n".join(blocco_corrente))
+            blocco_corrente = []
+            lunghezza_corrente = 0
+        blocco_corrente.append(riga)
+        lunghezza_corrente += len(riga) + 1
+
+    if blocco_corrente:
+        blocchi.append("\n".join(blocco_corrente))
+
+    for blocco in blocchi:
+        await update.message.reply_text(blocco, parse_mode="MarkdownV2")
 
 
 async def cmd_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -361,135 +413,6 @@ async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
-# Campi modificabili con /modifica: alias accettati -> colonna reale in DB
-CAMPI_MODIFICABILI = {
-    "nome": "nome",
-    "cognome": "cognome",
-    "username": "username",
-    "id": "telegram_id",
-    "id_telegram": "telegram_id",
-    "telegram_id": "telegram_id",
-}
-
-
-async def cmd_modifica(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user_id = update.effective_user.id
-    if not is_admin(user_id):
-        await update.message.reply_text(
-            "Non sei autorizzato a usare questo comando."
-        )
-        return
-
-    # Testo dopo il comando, es: "21 cognome Di Marco"
-    raw_text = update.message.text.partition(" ")[2].strip()
-    if not raw_text:
-        await update.message.reply_text(
-            "Uso corretto: /modifica <ID_cittadino> <campo> <nuovo valore>\n\n"
-            "Campi disponibili: nome, cognome, username, id (ID Telegram)\n\n"
-            "Esempi:\n"
-            "/modifica 13 username @nuovousername\n"
-            "/modifica 21 cognome Di Marco\n"
-            "/modifica 5 id 987654321"
-        )
-        return
-
-    # maxsplit=2: separa ID, campo, e il resto (che può contenere spazi,
-    # necessario per nomi/cognomi composti come "Di Marco")
-    pezzi = raw_text.split(maxsplit=2)
-    if len(pezzi) != 3:
-        await update.message.reply_text(
-            "Formato non valido. Uso corretto:\n"
-            "/modifica <ID_cittadino> <campo> <nuovo valore>\n\n"
-            "Esempio: /modifica 21 cognome Di Marco"
-        )
-        return
-
-    citizen_id_str, campo_raw, nuovo_valore = pezzi
-
-    if not citizen_id_str.isdigit():
-        await update.message.reply_text("L'ID cittadino deve essere un numero intero.")
-        return
-    citizen_id = int(citizen_id_str)
-
-    campo_key = campo_raw.strip().lower()
-    if campo_key not in CAMPI_MODIFICABILI:
-        campi_lista = ", ".join(sorted(set(CAMPI_MODIFICABILI.values())))
-        await update.message.reply_text(
-            f"Campo «{campo_raw}» non riconosciuto.\n"
-            f"Campi disponibili: nome, cognome, username, id (ID Telegram)"
-        )
-        return
-    colonna = CAMPI_MODIFICABILI[campo_key]
-
-    nuovo_valore = nuovo_valore.strip()
-
-    with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM cittadini WHERE citizen_id = ?", (citizen_id,)
-        ).fetchone()
-        if not row:
-            await update.message.reply_text(
-                f"Nessun cittadino trovato con ID #{citizen_id}."
-            )
-            return
-
-        # Validazioni specifiche per campo
-        if colonna == "telegram_id":
-            if not nuovo_valore.isdigit():
-                await update.message.reply_text(
-                    "Il nuovo ID Telegram deve essere un numero intero."
-                )
-                return
-            nuovo_valore_db = int(nuovo_valore)
-
-            # Evita di assegnare a due cittadini lo stesso ID Telegram
-            duplicato = conn.execute(
-                "SELECT citizen_id FROM cittadini WHERE telegram_id = ? AND citizen_id != ?",
-                (nuovo_valore_db, citizen_id),
-            ).fetchone()
-            if duplicato:
-                await update.message.reply_text(
-                    f"Questo ID Telegram è già assegnato al cittadino "
-                    f"#{duplicato['citizen_id']}."
-                )
-                return
-
-        elif colonna == "username":
-            pulito = nuovo_valore.lstrip("@").strip()
-            # Permette di rimuovere l'username scrivendo "-"
-            nuovo_valore_db = None if pulito in ("", "-") else pulito
-
-        else:  # nome o cognome
-            if not nuovo_valore:
-                await update.message.reply_text(
-                    f"Il nuovo {campo_key} non può essere vuoto."
-                )
-                return
-            nuovo_valore_db = nuovo_valore
-
-        valore_precedente = row[colonna]
-
-        conn.execute(
-            f"UPDATE cittadini SET {colonna} = ? WHERE citizen_id = ?",
-            (nuovo_valore_db, citizen_id),
-        )
-        conn.commit()
-
-    def fmt(v):
-        if v is None:
-            return "(nessuno)"
-        if colonna == "username":
-            return f"@{v}"
-        return str(v)
-
-    await update.message.reply_text(
-        f"Cittadino #{citizen_id} aggiornato.\n"
-        f"Campo: {campo_key}\n"
-        f"Valore precedente: {fmt(valore_precedente)}\n"
-        f"Nuovo valore: {fmt(nuovo_valore_db)}"
-    )
-
-
 # ----------------------------------------------------------------------
 # Comando di aiuto
 # ----------------------------------------------------------------------
@@ -498,13 +421,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "Bot del registro cittadini.\n\n"
         "Comandi disponibili per tutti:\n"
-        "/lista — invia l'elenco completo in Markdown\n"
+        "/esporta — invia l'elenco completo come file Markdown\n"
+        "/elenco — invia l'elenco completo come messaggio (nome, cognome, username)\n"
         "/cerca <testo> — cerca per nome, cognome o username\n"
         "/richiedi nome, cognome — invia una richiesta di cittadinanza\n\n"
         "Comandi amministratore:\n"
         "/inserisci ID, username, nome, cognome\n"
-        "/rimuovi ID_cittadino\n"
-        "/modifica ID_cittadino campo nuovo_valore"
+        "/rimuovi ID_cittadino"
     )
     await update.message.reply_text(text)
 
@@ -834,12 +757,12 @@ def main() -> None:
     application = Application.builder().token(token).build()
 
     application.add_handler(CommandHandler("start", cmd_start))
-    application.add_handler(CommandHandler("lista", cmd_lista))
+    application.add_handler(CommandHandler("esporta", cmd_esporta))
+    application.add_handler(CommandHandler("elenco", cmd_elenco))
     application.add_handler(CommandHandler("cerca", cmd_cerca))
     application.add_handler(CommandHandler("richiedi", cmd_richiedi))
     application.add_handler(CommandHandler("inserisci", cmd_inserisci))
     application.add_handler(CommandHandler("rimuovi", cmd_rimuovi))
-    application.add_handler(CommandHandler("modifica", cmd_modifica))
     application.add_handler(CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:"))
 
     logger.info("Bot avviato, in ascolto...")
