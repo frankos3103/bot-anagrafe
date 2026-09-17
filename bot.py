@@ -45,7 +45,7 @@ Log su canale:
 
 Avvio:
     python3 bot.py
-Richiede le variabili d'ambiente TOKEN e ROOT_ADMIN_ID (o le si può mettere
+Richiede le variabili d'ambiente TOKEN_CITIZENS_BOT e ROOT_ADMIN_ID (o le si può mettere
 direttamente in fondo al file, vedi sezione __main__). LOG_CHANNEL_ID è
 opzionale.
 """
@@ -1244,10 +1244,10 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 # ----------------------------------------------------------------------
 
 def main() -> None:
-    token = os.environ.get("TOKEN")
+    token = os.environ.get("TOKEN_CITIZENS_BOT")
     if not token:
         raise RuntimeError(
-            "Imposta la variabile d'ambiente TOKEN con il token "
+            "Imposta la variabile d'ambiente TOKEN_CITIZENS_BOT con il token "
             "ottenuto da BotFather prima di avviare il bot."
         )
 
