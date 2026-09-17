@@ -31,10 +31,23 @@ privato (messaggio diretto) a ciascun amministratore, con due pulsanti
 privato, deve aver avviato almeno una volta una chat con il bot (es.
 premendo /start in privato) — è una limitazione di Telegram, non del bot.
 
+Log su canale:
+    Se è impostata la variabile d'ambiente LOG_CHANNEL_ID (ID numerico,
+    es. -1001234567890, oppure @username se il canale è pubblico), il bot
+    invia automaticamente un messaggio su quel canale per:
+      - ogni richiesta di cittadinanza inviata con /richiedi
+      - ogni richiesta accettata, rifiutata o annullata (già cittadino)
+      - ogni modifica diretta al registro (/inserisci, /rimuovi)
+      - ogni aggiornamento automatico dello username di un cittadino
+    NOTA: il bot deve essere amministratore del canale per potervi scrivere.
+    Se la variabile non è impostata, questa funzione è semplicemente
+    disabilitata.
+
 Avvio:
     python3 bot.py
-Richiede la variabile d'ambiente TOKEN (o la si può mettere
-direttamente in fondo al file, vedi sezione __main__).
+Richiede le variabili d'ambiente TOKEN e ROOT_ADMIN_ID (o le si può mettere
+direttamente in fondo al file, vedi sezione __main__). LOG_CHANNEL_ID è
+opzionale.
 """
 
 import io
@@ -75,6 +88,23 @@ ADMINS_PATH = BASE_DIR / "admins.txt"
 # ID Telegram dell'utente root: può gestire l'elenco degli amministratori.
 # Impostare la variabile d'ambiente ROOT_ADMIN_ID.
 ROOT_ADMIN_ID = int(os.environ["ROOT_ADMIN_ID"])
+
+# ID (o @username) del canale/gruppo Telegram su cui inviare il log di ogni
+# modifica al registro, ogni richiesta e ogni accettazione/rifiuto.
+# Impostare la variabile d'ambiente LOG_CHANNEL_ID con l'ID numerico del
+# canale (es. -1001234567890) oppure con il suo @username, se pubblico.
+# NOTA: il bot deve essere amministratore del canale per potervi scrivere.
+# Se la variabile non è impostata, il logging su canale è semplicemente
+# disabilitato (il bot continua a funzionare normalmente).
+_raw_log_channel = os.environ.get("LOG_CHANNEL_ID")
+if _raw_log_channel:
+    _raw_log_channel = _raw_log_channel.strip()
+    try:
+        LOG_CHANNEL_ID: int | str = int(_raw_log_channel)
+    except ValueError:
+        LOG_CHANNEL_ID = _raw_log_channel  # es. "@nome_canale"
+else:
+    LOG_CHANNEL_ID = None
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -244,6 +274,45 @@ def format_row(row: sqlite3.Row) -> str:
         f"#{row['citizen_id']} — {row['telegram_id']} — {row['nome']} {row['cognome']} "
         f"({username})"
     )
+
+
+# ----------------------------------------------------------------------
+# Log su canale Telegram
+# ----------------------------------------------------------------------
+
+async def send_log(context: ContextTypes.DEFAULT_TYPE, testo: str) -> None:
+    """Invia un messaggio di log sul canale configurato (LOG_CHANNEL_ID).
+
+    Non fa mai fallire il comando chiamante: eventuali errori (canale non
+    configurato, bot non admin del canale, canale non raggiungibile, ecc.)
+    vengono solo loggati localmente.
+    """
+    if not LOG_CHANNEL_ID:
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=LOG_CHANNEL_ID,
+            text=testo,
+            parse_mode="Markdown",
+            disable_web_page_preview=True,
+        )
+    except TelegramError as exc:
+        logger.warning(
+            "Impossibile inviare il log sul canale %s: %s", LOG_CHANNEL_ID, exc
+        )
+
+
+def _fmt_utente(user) -> str:
+    """Rappresentazione leggibile di un utente Telegram per i log."""
+    if user is None:
+        return "sconosciuto"
+    if user.username:
+        return f"@{user.username} ({user.id})"
+    return f"{user.full_name} ({user.id})"
+
+
+def _now_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
 # ----------------------------------------------------------------------
 # Menù nativo di Telegram
@@ -606,6 +675,15 @@ async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         conferma += f"\nUsername: @{username}"
     await update.message.reply_text(conferma)
 
+    username_log = f"@{username}" if username else "(nessuno username)"
+    await send_log(
+        context,
+        f"➕ *Cittadino inserito*\n"
+        f"Da: {_fmt_utente(update.effective_user)}\n"
+        f"Cittadino: #{new_id} — {nome} {cognome} — {username_log} (Telegram ID {telegram_id})\n"
+        f"Quando: {_now_str()}",
+    )
+
 
 async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
@@ -638,6 +716,16 @@ async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await update.message.reply_text(
         f"Cittadino #{citizen_id} ({row['nome']} {row['cognome']}) rimosso dal registro."
+    )
+
+    username_log = f"@{row['username']}" if row["username"] else "(nessuno username)"
+    await send_log(
+        context,
+        f"➖ *Cittadino rimosso*\n"
+        f"Da: {_fmt_utente(update.effective_user)}\n"
+        f"Cittadino: #{citizen_id} — {row['nome']} {row['cognome']} — {username_log} "
+        f"(Telegram ID {row['telegram_id']})\n"
+        f"Quando: {_now_str()}",
     )
 
 
@@ -785,6 +873,14 @@ async def cmd_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
         conn.commit()
 
+    await send_log(
+        context,
+        f"📋 *Nuova richiesta di cittadinanza* #{request_id}\n"
+        f"Da: {richiedente} (Telegram ID {telegram_id})\n"
+        f"Nome: {nome} {cognome}\n"
+        f"Quando: {_now_str()}",
+    )
+
     if admin_non_raggiungibili and update.effective_chat.type != "private":
         # Avvisa nella chat del gruppo che alcuni admin non sono raggiungibili,
         # così qualcuno può sollecitarli ad avviare il bot in privato.
@@ -896,6 +992,14 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 await _aggiorna_notifiche_admin(
                     context, row["notifiche"], testo_finale, skip_chat_message=current_chat_msg
                 )
+                await send_log(
+                    context,
+                    f"⚠️ *Richiesta annullata* #{request_id}\n"
+                    f"{row['nome']} {row['cognome']} risultava già cittadino "
+                    f"(#{already_citizen['citizen_id']}).\n"
+                    f"Gestita da: {admin_username}\n"
+                    f"Quando: {_now_str()}",
+                )
                 return
 
             cursor = conn.execute(
@@ -939,6 +1043,15 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
             except TelegramError:
                 pass
 
+            await send_log(
+                context,
+                f"✅ *Richiesta accettata* #{request_id}\n"
+                f"{row['nome']} {row['cognome']} è ora cittadino #{new_citizen_id} "
+                f"(Telegram ID {row['telegram_id']})\n"
+                f"Gestita da: {admin_username}\n"
+                f"Quando: {_now_str()}",
+            )
+
         elif azione == "rifiuta":
             conn.execute(
                 """
@@ -968,6 +1081,14 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 )
             except TelegramError:
                 pass
+
+            await send_log(
+                context,
+                f"❌ *Richiesta rifiutata* #{request_id}\n"
+                f"{row['nome']} {row['cognome']} (Telegram ID {row['telegram_id']})\n"
+                f"Gestita da: {admin_username}\n"
+                f"Quando: {_now_str()}",
+            )
 
         else:
             await query.answer("Azione non riconosciuta.", show_alert=True)
@@ -1105,6 +1226,16 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             telegram_id,
             row["username"],
             username,
+        )
+
+        vecchio = f"@{row['username']}" if row["username"] else "(nessuno username)"
+        nuovo = f"@{username}" if username else "(nessuno username)"
+        await send_log(
+            context,
+            f"🔄 *Username aggiornato*\n"
+            f"Cittadino: #{row['citizen_id']} (Telegram ID {telegram_id})\n"
+            f"{vecchio} → {nuovo}\n"
+            f"Quando: {_now_str()}",
         )
 
 
