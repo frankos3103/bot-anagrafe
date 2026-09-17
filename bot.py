@@ -1012,7 +1012,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     text = (
-        "🏛 *Bot Registro Cittadini — Menu Comandi*\n\n"
+        "🏛 *Bot Registro Cittadiiini — Menu Comandi*\n\n"
         "Seleziona un comando qui sotto per eseguirlo subito o per vedere le istruzioni di utilizzo:"
     )
 
@@ -1059,6 +1059,55 @@ async def on_cmd_button_callback(update: Update, context: ContextTypes.DEFAULT_T
     elif cmd == "rimuovi_admin":
         await query.message.reply_text("➖ *Uso del comando:*\n`/rimuovi_admin <ID_telegram>`", parse_mode="Markdown")
 
+
+# -----------------------
+# Username auto-aggiornante
+# -----------------------
+
+async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Aggiorna automaticamente lo username del cittadino quando scrive nel gruppo."""
+
+    user = update.effective_user
+
+    if not user:
+        return
+
+    # Consideriamo solo messaggi provenienti da gruppi/supergruppi
+    if update.effective_chat is None or update.effective_chat.type not in ("group", "supergroup"):
+        return
+
+    telegram_id = user.id
+    username = user.username  # None se l'utente non ha username
+
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT citizen_id, username FROM cittadini WHERE telegram_id = ?",
+            (telegram_id,)
+        ).fetchone()
+
+        # L'utente non è un cittadino registrato
+        if not row:
+            return
+
+        # Nessuna modifica necessaria
+        if row["username"] == username:
+            return
+
+        conn.execute(
+            "UPDATE cittadini SET username = ? WHERE telegram_id = ?",
+            (username, telegram_id)
+        )
+        conn.commit()
+
+        logger.info(
+            "Username aggiornato per il cittadino #%s (Telegram ID %s): %r -> %r",
+            row["citizen_id"],
+            telegram_id,
+            row["username"],
+            username,
+        )
+
+
 # ----------------------------------------------------------------------
 # Avvio applicazione
 # ----------------------------------------------------------------------
@@ -1090,9 +1139,14 @@ def main() -> None:
 
     # 2. Callback handlers
     application.add_handler(CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:"))
-    application.add_handler(CallbackQueryHandler(on_cmd_button_callback, pattern=r"^cmd_btn:")) 
+    application.add_handler(CallbackQueryHandler(on_cmd_button_callback, pattern=r"^cmd_btn:"))
 
-    # 3. HANDLER CATCH-ALL
+    # 3. Aggiornamento automatico username dei cittadini nei gruppi
+    application.add_handler(
+        MessageHandler(filters.ChatType.GROUPS, on_group_message)
+    )
+
+    # 4. HANDLER CATCH-ALL
     application.add_handler(MessageHandler(filters.TEXT | filters.COMMAND, cmd_help))
     
 
