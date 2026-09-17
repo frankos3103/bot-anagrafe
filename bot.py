@@ -1133,7 +1133,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     text = (
-        "🏛 *Bot Registro Cittadiiini — Menu Comandi*\n\n"
+        "🏛 *Bot Registro Cittadini — Menu Comandi*\n\n"
         "Seleziona un comando qui sotto per eseguirlo subito o per vedere le istruzioni di utilizzo:"
     )
 
