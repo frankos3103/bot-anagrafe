@@ -1,9 +1,2 @@
-anyio==4.14.2
-asarPy==1.0.1
-certifi==2026.7.22
-h11==0.16.0
-httpcore==1.0.9
-httpx==0.28.1
-idna==3.19
-python-dotenv==1.2.3
-python-telegram-bot==21.6
+python-telegram-bot>=21.6,<23
+python-dotenv>=1.0

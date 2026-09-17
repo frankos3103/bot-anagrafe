@@ -2,3 +2,7 @@
 registro.db
 admins.txt
 token
+.venv
+__pycache__/
+*.py[cod]
+.pytest_cache/
