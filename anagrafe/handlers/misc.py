@@ -1,4 +1,4 @@
-"""Handler di contorno: aggiornamento automatico degli username e catch-all."""
+"""Handler di contorno: aggiornamento automatico dei tag e catch-all."""
 
 from __future__ import annotations
 
@@ -15,15 +15,16 @@ from .common import db, rispondi, ruolo_utente
 logger = logging.getLogger(__name__)
 
 
-async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Quando un cittadino scrive in un gruppo, ne aggiorna lo username.
+async def aggiorna_tag(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A ogni interazione con il bot registra il tag attuale di chi scrive.
 
-    Gira in un gruppo di handler separato, così non impedisce agli altri
-    handler di elaborare lo stesso messaggio.
+    Gira su qualunque update (messaggi in privato e nei gruppi, pulsanti) in un
+    gruppo di handler che precede tutti gli altri, così un comando che usa il
+    tag trova già il valore aggiornato, e non impedisce ad altri handler di
+    elaborare lo stesso update.
     """
     utente = update.effective_user
-    chat = update.effective_chat
-    if utente is None or chat is None or chat.type not in ("group", "supergroup"):
+    if utente is None or utente.is_bot:
         return
 
     with db(context) as conn:
@@ -32,19 +33,36 @@ async def on_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if cambiamento is None:
         return
 
-    riga, nuovo = cambiamento
+    for vecchio in cambiamento.sottratto_a:
+        logger.info(
+            "Tag @%s tolto al cittadino #%s: ora appartiene a Telegram ID %s",
+            vecchio["username"],
+            vecchio["citizen_id"],
+            utente.id,
+        )
+        await send_log(
+            context,
+            f"🔄 *Username non più valido*\n"
+            f"Cittadino: #{vecchio['citizen_id']} (Telegram ID {vecchio['telegram_id']})\n"
+            f"{fmt_username(vecchio['username'])} ora appartiene a Telegram ID {utente.id}",
+        )
+
+    riga = cambiamento.riga
+    if riga is None:
+        return
+
     logger.info(
         "Username aggiornato per il cittadino #%s (Telegram ID %s): %r -> %r",
         riga["citizen_id"],
         utente.id,
         riga["username"],
-        nuovo,
+        cambiamento.nuovo,
     )
     await send_log(
         context,
         f"🔄 *Username aggiornato*\n"
         f"Cittadino: #{riga['citizen_id']} (Telegram ID {utente.id})\n"
-        f"{fmt_username(riga['username'])} -> {fmt_username(nuovo)}",
+        f"{fmt_username(riga['username'])} -> {fmt_username(cambiamento.nuovo)}",
     )
 
 

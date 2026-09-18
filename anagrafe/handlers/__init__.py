@@ -2,29 +2,31 @@
 
 L'ordine conta. Gli handler stanno in due gruppi:
 
-  gruppo 0 — comandi, pulsanti e, per ultimo, il catch-all che risponde ai
-             comandi sconosciuti. Dentro un gruppo Telegram elabora al massimo
-             un handler, quindi il catch-all scatta solo se nient'altro ha
-             raccolto il messaggio.
-  gruppo 1 — l'aggiornamento automatico degli username, che deve poter vedere
-             *tutti* i messaggi di gruppo senza impedire agli altri handler di
-             elaborarli.
+  gruppo -1 — l'aggiornamento automatico dei tag, che deve vedere *tutti* gli
+              update (privati, gruppi, pulsanti) prima che vengano elaborati,
+              senza impedire agli altri handler di farlo.
+  gruppo 0  — comandi, pulsanti e, per ultimo, il catch-all che risponde ai
+              comandi sconosciuti. Dentro un gruppo Telegram elabora al massimo
+              un handler, quindi il catch-all scatta solo se nient'altro ha
+              raccolto il messaggio.
 """
 
 from __future__ import annotations
 
+from telegram import Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
 from . import comandi
 from .importazione import cmd_importa, on_documento
 from .menu import build_menu_handler
-from .misc import catch_all, on_error, on_group_message
+from .misc import aggiorna_tag, catch_all, on_error
 from .richieste import on_richiesta_callback
 
 COMANDI = {
@@ -44,6 +46,9 @@ COMANDI = {
 
 
 def registra_handlers(application: Application) -> None:
+    # 0. Il tag di chi scrive, aggiornato prima di tutto il resto.
+    application.add_handler(TypeHandler(Update, aggiorna_tag), group=-1)
+
     # 1. La pulsantiera, che ha la precedenza perché gestisce una conversazione.
     application.add_handler(build_menu_handler())
 
@@ -65,11 +70,6 @@ def registra_handlers(application: Application) -> None:
         MessageHandler(
             filters.COMMAND | (filters.ChatType.PRIVATE & filters.TEXT), catch_all
         )
-    )
-
-    # Gruppo 1: sempre eseguito, non blocca nulla.
-    application.add_handler(
-        MessageHandler(filters.ChatType.GROUPS, on_group_message), group=1
     )
 
     # Rete di sicurezza per le eccezioni non gestite.

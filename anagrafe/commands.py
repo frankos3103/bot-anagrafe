@@ -11,9 +11,10 @@ from typing import Any, Callable
 
 from .roles import Role
 from .validators import (
-    valida_citizen_id,
     valida_nome,
     valida_ricerca,
+    valida_riferimento_cittadino,
+    valida_riferimento_utente,
     valida_telegram_id,
     valida_username_opzionale,
 )
@@ -112,15 +113,15 @@ COMMANDS: tuple[Comando, ...] = (
         nome="cerca",
         ruolo=Role.PUBBLICO,
         emoji="🔍",
-        descrizione="Cerca per nome, cognome, username o ID Telegram",
-        uso="/cerca <stringa>",
-        esempio="/cerca Mario",
+        descrizione="Cerca per nome e/o cognome, @username, #ID o ID Telegram",
+        uso="/cerca <testo>",
+        esempio="/cerca Mario Rossi",
         etichetta_menu="Cerca",
         campi=(
             Campo(
                 "query",
                 "Ricerca",
-                "Cosa vuoi cercare? (nome, cognome, username o ID Telegram)",
+                "Cosa vuoi cercare? (nome e/o cognome, @username, #ID o ID Telegram)",
                 valida_ricerca,
             ),
         ),
@@ -168,15 +169,16 @@ COMMANDS: tuple[Comando, ...] = (
         ruolo=Role.ADMIN,
         emoji="❌",
         descrizione="Rimuove un cittadino dal registro",
-        uso="/rimuovi <ID_cittadino>",
-        esempio="/rimuovi 12",
+        uso="/rimuovi <ID_cittadino | @username>",
+        esempio="/rimuovi 12 oppure /rimuovi @mariorossi",
         etichetta_menu="Rimuovi",
         campi=(
             Campo(
-                "citizen_id",
-                "ID cittadino",
-                "Qual è l'ID cittadino da rimuovere? (il numero dopo #)",
-                valida_citizen_id,
+                "cittadino",
+                "Cittadino",
+                "Quale cittadino vuoi rimuovere? (ID cittadino, il numero dopo #, "
+                "oppure @username)",
+                valida_riferimento_cittadino,
             ),
         ),
     ),
@@ -202,15 +204,16 @@ COMMANDS: tuple[Comando, ...] = (
         ruolo=Role.ROOT,
         emoji="🛡",
         descrizione="Aggiunge un amministratore",
-        uso="/aggiungi_admin <ID_telegram>",
-        esempio="/aggiungi_admin 123456789",
+        uso="/aggiungi_admin <ID_telegram | @username>",
+        esempio="/aggiungi_admin 123456789 oppure /aggiungi_admin @mariorossi",
         etichetta_menu="Aggiungi admin",
         campi=(
             Campo(
-                "telegram_id",
-                "ID Telegram",
-                "Qual è l'ID Telegram del nuovo amministratore?",
-                valida_telegram_id,
+                "utente",
+                "Utente",
+                "Chi è il nuovo amministratore? (ID Telegram, oppure @username "
+                "se è un cittadino)",
+                valida_riferimento_utente,
             ),
         ),
     ),
@@ -219,15 +222,16 @@ COMMANDS: tuple[Comando, ...] = (
         ruolo=Role.ROOT,
         emoji="🚫",
         descrizione="Rimuove un amministratore",
-        uso="/rimuovi_admin <ID_telegram>",
-        esempio="/rimuovi_admin 123456789",
+        uso="/rimuovi_admin <ID_telegram | @username>",
+        esempio="/rimuovi_admin 123456789 oppure /rimuovi_admin @mariorossi",
         etichetta_menu="Rimuovi admin",
         campi=(
             Campo(
-                "telegram_id",
-                "ID Telegram",
-                "Qual è l'ID Telegram dell'amministratore da rimuovere?",
-                valida_telegram_id,
+                "utente",
+                "Utente",
+                "Quale amministratore vuoi rimuovere? (ID Telegram, oppure "
+                "@username se è un cittadino)",
+                valida_riferimento_utente,
             ),
         ),
     ),

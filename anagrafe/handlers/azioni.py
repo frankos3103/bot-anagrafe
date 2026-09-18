@@ -15,7 +15,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Upda
 from telegram.error import Forbidden, TelegramError
 from telegram.ext import ContextTypes
 
-from .. import repository
+from .. import controlli, repository
 from ..commands import render_help
 from ..formatting import (
     format_row,
@@ -25,6 +25,7 @@ from ..formatting import (
 )
 from ..logbook import fmt_username, fmt_utente, send_log
 from ..roles import ETICHETTE_RUOLO, Role
+from ..validators import ErroreValidazione
 from .common import db, get_roles, richiede, rispondi, ruolo_utente
 
 logger = logging.getLogger(__name__)
@@ -74,12 +75,17 @@ async def azione_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE, valor
     query = valori["query"]
     with db(context) as conn:
         righe = repository.search_citizens(conn, query)
+        suggeriti = [] if righe else repository.suggest_citizens(conn, query)
 
-    if not righe:
+    if righe:
+        intestazione = f"Risultati per «{query}» ({len(righe)}):"
+    elif suggeriti:
+        righe = suggeriti
+        intestazione = f"Nessun risultato esatto per «{query}». Forse cercavi:"
+    else:
         await rispondi(update, f"Nessun cittadino trovato per «{query}».")
         return
 
-    intestazione = f"Risultati per «{query}» ({len(righe)}):"
     for blocco in spezza_in_blocchi([format_row(r) for r in righe], intestazione):
         await rispondi(update, blocco)
 
@@ -93,20 +99,10 @@ async def azione_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE, va
     nome, cognome = valori["nome"], valori["cognome"]
 
     with db(context) as conn:
-        gia_cittadino = repository.get_citizen_by_telegram_id(conn, utente.id)
-        if gia_cittadino:
-            await rispondi(
-                update, f"Sei già cittadino con ID #{gia_cittadino['citizen_id']}."
-            )
-            return
-
-        in_attesa = repository.pending_request_for(conn, utente.id)
-        if in_attesa:
-            await rispondi(
-                update,
-                f"Hai già una richiesta in attesa (#{in_attesa['request_id']}). "
-                "Attendi che un amministratore la esamini.",
-            )
+        try:
+            controlli.precondizione_richiedi(conn, utente.id)
+        except ErroreValidazione as exc:
+            await rispondi(update, str(exc))
             return
 
         request_id = repository.create_request(
@@ -189,14 +185,12 @@ async def azione_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE, v
 
     with db(context) as conn:
         try:
+            controlli.verifica_nuovo_cittadino(conn, telegram_id)
             citizen_id = repository.insert_citizen(
                 conn, telegram_id, username, nome, cognome
             )
-        except repository.CittadinoGiaEsistente as exc:
-            await rispondi(
-                update,
-                f"Questo ID Telegram è già registrato come cittadino #{exc.citizen_id}.",
-            )
+        except ErroreValidazione as exc:
+            await rispondi(update, str(exc))
             return
 
     conferma = (
@@ -219,18 +213,22 @@ async def azione_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE, v
 
 @richiede(Role.ADMIN)
 async def azione_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
-    citizen_id = valori["citizen_id"]
-
     with db(context) as conn:
+        try:
+            citizen_id = controlli.risolvi_cittadino(conn, valori["cittadino"])["citizen_id"]
+        except ErroreValidazione as exc:
+            await rispondi(update, str(exc))
+            return
         riga = repository.delete_citizen(conn, citizen_id)
 
     if riga is None:
         await rispondi(update, f"Nessun cittadino trovato con ID #{citizen_id}.")
         return
 
+    tag = f", @{riga['username']}" if riga["username"] else ""
     await rispondi(
         update,
-        f"✅ Cittadino #{citizen_id} ({riga['nome']} {riga['cognome']}) "
+        f"✅ Cittadino #{citizen_id} ({riga['nome']} {riga['cognome']}{tag}) "
         "rimosso dal registro.",
     )
 
@@ -247,28 +245,37 @@ async def azione_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE, val
 # Comandi root
 # ----------------------------------------------------------------------
 
+def _fmt_admin(conn, admin_id: int) -> str:
+    """«123 (@mario)» se l'admin è un cittadino con tag, altrimenti l'ID."""
+    riga = repository.get_citizen_by_telegram_id(conn, admin_id)
+    if riga is not None and riga["username"]:
+        return f"{admin_id} (@{riga['username']})"
+    return str(admin_id)
+
+
 @richiede(Role.ROOT)
 async def azione_elenco_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     roles = get_roles(context)
-    righe = [
-        f"• {admin_id} — {ETICHETTE_RUOLO[roles.role_of(admin_id)]}"
-        for admin_id in roles.tutti_gli_admin()
-    ]
+    with db(context) as conn:
+        righe = [
+            f"• {_fmt_admin(conn, admin_id)} — {ETICHETTE_RUOLO[roles.role_of(admin_id)]}"
+            for admin_id in roles.tutti_gli_admin()
+        ]
     await rispondi(update, "👮 Elenco amministratori\n\n" + "\n".join(righe))
 
 
 @richiede(Role.ROOT)
 async def azione_aggiungi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     roles = get_roles(context)
-    admin_id = valori["telegram_id"]
 
-    if roles.is_root(admin_id):
-        await rispondi(
-            update,
-            "Questo ID è già il root e dispone automaticamente dei privilegi "
-            "di amministratore.",
-        )
-        return
+    with db(context) as conn:
+        try:
+            admin_id = controlli.risolvi_telegram_id(conn, valori["utente"])
+            controlli.verifica_nuovo_admin(roles, admin_id)
+        except ErroreValidazione as exc:
+            await rispondi(update, str(exc))
+            return
+        descrizione = _fmt_admin(conn, admin_id)
 
     try:
         aggiunto = roles.aggiungi(admin_id)
@@ -281,25 +288,27 @@ async def azione_aggiungi_admin(update: Update, context: ContextTypes.DEFAULT_TY
         await rispondi(update, f"L'ID Telegram {admin_id} è già un amministratore.")
         return
 
-    await rispondi(update, f"✅ ID Telegram {admin_id} aggiunto agli amministratori.")
+    await rispondi(update, f"✅ {descrizione} aggiunto agli amministratori.")
     await send_log(
         context,
         f"🛡 *Amministratore aggiunto*\n"
         f"Da: {fmt_utente(update.effective_user)}\n"
-        f"Nuovo admin: {admin_id}",
+        f"Nuovo admin: {descrizione}",
     )
 
 
 @richiede(Role.ROOT)
 async def azione_rimuovi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     roles = get_roles(context)
-    admin_id = valori["telegram_id"]
 
-    if roles.is_root(admin_id):
-        await rispondi(
-            update, "Il root non può essere rimosso dall'elenco degli amministratori."
-        )
-        return
+    with db(context) as conn:
+        try:
+            admin_id = controlli.risolvi_telegram_id(conn, valori["utente"])
+            controlli.verifica_admin_rimovibile(roles, admin_id)
+        except ErroreValidazione as exc:
+            await rispondi(update, str(exc))
+            return
+        descrizione = _fmt_admin(conn, admin_id)
 
     try:
         rimosso = roles.rimuovi(admin_id)
@@ -309,18 +318,20 @@ async def azione_rimuovi_admin(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     if not rimosso:
+        # Il root non si rimuove e gli altri sono già stati verificati: resta
+        # solo il caso di un admin sparito dal file nel frattempo.
         await rispondi(
             update,
             f"L'ID Telegram {admin_id} non risulta nell'elenco degli amministratori.",
         )
         return
 
-    await rispondi(update, f"✅ ID Telegram {admin_id} rimosso dagli amministratori.")
+    await rispondi(update, f"✅ {descrizione} rimosso dagli amministratori.")
     await send_log(
         context,
         f"🚫 *Amministratore rimosso*\n"
         f"Da: {fmt_utente(update.effective_user)}\n"
-        f"Admin rimosso: {admin_id}",
+        f"Admin rimosso: {descrizione}",
     )
 
 

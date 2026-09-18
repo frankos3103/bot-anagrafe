@@ -3,10 +3,15 @@
 import pytest
 
 from anagrafe.validators import (
+    RIF_CITIZEN_ID,
+    RIF_TELEGRAM_ID,
+    RIF_USERNAME,
     ErroreValidazione,
+    Riferimento,
     normalizza_username,
     parse_inserisci,
     parse_richiedi,
+    parse_riferimento,
     valida_citizen_id,
     valida_nome,
     valida_ricerca,
@@ -114,6 +119,32 @@ def test_parse_richiedi():
 def test_parse_richiedi_non_valido(grezzo):
     with pytest.raises(ErroreValidazione):
         parse_richiedi(grezzo)
+
+
+@pytest.mark.parametrize(
+    "grezzo, default, atteso",
+    [
+        ("@mariorossi", RIF_CITIZEN_ID, Riferimento(RIF_USERNAME, "mariorossi")),
+        ("@mariorossi", RIF_TELEGRAM_ID, Riferimento(RIF_USERNAME, "mariorossi")),
+        ("#12", RIF_TELEGRAM_ID, Riferimento(RIF_CITIZEN_ID, 12)),
+        (" 12 ", RIF_CITIZEN_ID, Riferimento(RIF_CITIZEN_ID, 12)),
+        ("123456789", RIF_TELEGRAM_ID, Riferimento(RIF_TELEGRAM_ID, 123456789)),
+    ],
+)
+def test_parse_riferimento(grezzo, default, atteso):
+    assert parse_riferimento(grezzo, default) == atteso
+
+
+@pytest.mark.parametrize("grezzo", ["", "@", "@non valido", "#abc", "mario", "-3"])
+def test_parse_riferimento_non_valido(grezzo):
+    with pytest.raises(ErroreValidazione):
+        parse_riferimento(grezzo, RIF_TELEGRAM_ID)
+
+
+def test_riferimento_leggibile():
+    assert str(Riferimento(RIF_USERNAME, "mario")) == "@mario"
+    assert str(Riferimento(RIF_CITIZEN_ID, 12)) == "#12"
+    assert str(Riferimento(RIF_TELEGRAM_ID, 123)) == "123"
 
 
 def test_il_messaggio_di_errore_e_mostrabile():

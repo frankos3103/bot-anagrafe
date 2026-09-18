@@ -23,8 +23,17 @@ modifica su un canale Telegram di log.
   ricordare la sintassi, chiedendo i dati un campo alla volta.
 - **Aiuto dinamico** (`/help`): mostra solo i comandi che chi lo invoca può
   davvero usare.
-- **Username sempre aggiornati**: quando un cittadino scrive in un gruppo dove
-  c'è il bot, il suo `@username` viene aggiornato automaticamente nel registro.
+- **Username sempre aggiornati**: a ogni interazione con il bot (in privato,
+  in un gruppo o premendo un pulsante) il `@username` di un cittadino viene
+  aggiornato nel registro. Un tag appartiene a un solo utente alla volta: se lo
+  prende qualcun altro, viene tolto al cittadino che lo aveva prima.
+- **Il tag al posto dell'ID**: `/rimuovi`, `/aggiungi_admin` e `/rimuovi_admin`
+  accettano anche `@username` (di un cittadino) oltre all'ID.
+- **Ricerca per parole**: `/cerca Mario Rossi` (in qualunque ordine, ignorando
+  maiuscole e accenti); se non trova nulla propone i nomi più simili.
+- **Errori subito**: un'operazione destinata a fallire (es. richiedere la
+  cittadinanza quando la si ha già, rimuovere un ID inesistente) lo dice prima
+  di chiedere altri dati.
 - **Log su canale**: ogni inserimento, rimozione, richiesta e cambio di
   username viene scritto su un canale Telegram scelto.
 
@@ -93,7 +102,7 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | `/menu` | Apre la pulsantiera guidata. |
 | `/elenco` | Elenco completo dei cittadini (nome, cognome, username). |
 | `/esporta` | Invia il registro come file Markdown. |
-| `/cerca <stringa>` | Cerca per nome, cognome, username o ID Telegram. |
+| `/cerca <testo>` | Cerca per nome e/o cognome (in qualunque ordine), `@username`, `#ID` o ID Telegram. Senza risultati esatti propone i nomi più simili. |
 | `/richiedi <nome>, <cognome>` | Invia una richiesta di cittadinanza. |
 
 ### Amministratori
@@ -101,15 +110,15 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | Comando | Cosa fa |
 |---|---|
 | `/inserisci <ID_telegram>, <username>, <nome>, <cognome>` | Inserisce un cittadino. Lo username può essere lasciato vuoto. |
-| `/rimuovi <ID_cittadino>` | Rimuove il cittadino con quell'ID (il numero dopo `#`). |
+| `/rimuovi <ID_cittadino \| @username>` | Rimuove il cittadino con quell'ID (il numero dopo `#`) o con quel tag. |
 | `/importa` | Importa più cittadini da un file CSV (vedi sotto). |
 
 ### Root
 
 | Comando | Cosa fa |
 |---|---|
-| `/aggiungi_admin <ID_telegram>` | Promuove un utente ad amministratore. |
-| `/rimuovi_admin <ID_telegram>` | Revoca i privilegi di amministratore. |
+| `/aggiungi_admin <ID_telegram \| @username>` | Promuove un utente ad amministratore (il tag deve essere di un cittadino). |
+| `/rimuovi_admin <ID_telegram \| @username>` | Revoca i privilegi di amministratore. |
 | `/elenco_admin` | Mostra gli amministratori configurati. |
 
 ---
@@ -193,7 +202,7 @@ Se imposti `LOG_CHANNEL_ID`, il bot scrive sul canale un messaggio per ogni:
 - inserimento o rimozione di un cittadino;
 - import CSV andato a buon fine;
 - promozione o revoca di un amministratore;
-- aggiornamento automatico di uno username.
+- aggiornamento automatico di uno username (anche quando un tag passa a un altro utente).
 
 Se il canale non è raggiungibile l'errore viene solo annotato nei log locali:
 il comando dell'utente non fallisce mai per colpa del log.
@@ -208,10 +217,11 @@ Tre inciampi che non dipendono dal bot ma dalla piattaforma:
    avviato una chat privata col bot.** Se non l'ha mai fatto, deve premere
    `/start` in privato. Il bot avvisa quando non riesce a raggiungere qualcuno.
 2. **Per scrivere sul canale di log, il bot deve esserne amministratore.**
-3. **Per aggiornare gli username automaticamente, la *privacy mode* va
-   disattivata** da @BotFather (*Bot Settings → Group Privacy → Turn off*).
-   Con la privacy mode attiva il bot non vede i messaggi di gruppo che non lo
-   menzionano, e l'aggiornamento non può funzionare.
+3. **Per aggiornare gli username anche dai messaggi di gruppo, la *privacy
+   mode* va disattivata** da @BotFather (*Bot Settings → Group Privacy → Turn
+   off*). Con la privacy mode attiva il bot non vede i messaggi di gruppo che
+   non lo menzionano: l'aggiornamento avviene comunque, ma solo quando il
+   cittadino usa il bot.
 
 ---
 
@@ -239,16 +249,18 @@ anagrafe/
 ├── roles.py           ruoli e file admins.txt
 ├── commands.py        registro dei comandi (fonte unica di /help e /menu)
 ├── validators.py      validazione degli argomenti
+├── controlli.py       controlli fail-fast e risoluzione di #ID / @tag
 ├── formatting.py      escape e impaginazione dei messaggi
 ├── csv_import.py      parsing e import dei file CSV
 ├── logbook.py         log sul canale Telegram
 └── handlers/
     ├── azioni.py      le azioni, condivise fra comandi e pulsantiera
+    ├── controlli.py   quali controlli girano a ogni passo del wizard
     ├── comandi.py     i comandi testuali
     ├── menu.py        la pulsantiera e il wizard
     ├── richieste.py   accettazione e rifiuto delle richieste
     ├── importazione.py ricezione del file CSV
-    └── misc.py        username automatici e catch-all
+    └── misc.py        tag automatici e catch-all
 tests/                 test della logica (niente Telegram)
 ```
 

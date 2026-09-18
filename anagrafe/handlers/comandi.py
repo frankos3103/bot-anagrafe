@@ -10,9 +10,9 @@ from ..validators import (
     ErroreValidazione,
     parse_inserisci,
     parse_richiedi,
-    valida_citizen_id,
     valida_ricerca,
-    valida_telegram_id,
+    valida_riferimento_cittadino,
+    valida_riferimento_utente,
 )
 from .azioni import (
     azione_aggiungi_admin,
@@ -26,6 +26,7 @@ from .azioni import (
     azione_rimuovi_admin,
 )
 from .common import rispondi, ruolo_utente
+from .controlli import PRECONDIZIONI
 
 
 def _argomenti(update: Update) -> str:
@@ -76,6 +77,14 @@ async def cmd_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def cmd_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Prima di tutto: se la richiesta è comunque impossibile, è inutile
+    # lamentarsi del formato degli argomenti.
+    try:
+        await PRECONDIZIONI["richiedi"](update, context)
+    except ErroreValidazione as exc:
+        await rispondi(update, str(exc))
+        return
+
     try:
         dati = parse_richiedi(_argomenti(update))
     except ErroreValidazione as exc:
@@ -108,11 +117,11 @@ async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        citizen_id = valida_citizen_id(_argomenti(update))
+        cittadino = valida_riferimento_cittadino(_argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "rimuovi", exc)
         return
-    await azione_rimuovi(update, context, {"citizen_id": citizen_id})
+    await azione_rimuovi(update, context, {"cittadino": cittadino})
 
 
 # ----------------------------------------------------------------------
@@ -125,17 +134,17 @@ async def cmd_elenco_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def cmd_aggiungi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        telegram_id = valida_telegram_id(_argomenti(update))
+        utente = valida_riferimento_utente(_argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "aggiungi_admin", exc)
         return
-    await azione_aggiungi_admin(update, context, {"telegram_id": telegram_id})
+    await azione_aggiungi_admin(update, context, {"utente": utente})
 
 
 async def cmd_rimuovi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        telegram_id = valida_telegram_id(_argomenti(update))
+        utente = valida_riferimento_utente(_argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "rimuovi_admin", exc)
         return
-    await azione_rimuovi_admin(update, context, {"telegram_id": telegram_id})
+    await azione_rimuovi_admin(update, context, {"utente": utente})

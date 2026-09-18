@@ -86,6 +86,65 @@ def test_ricerca(registro, query, attesi):
     assert trovati == attesi
 
 
+@pytest.mark.parametrize(
+    "query, attesi",
+    [
+        ("Mario Rossi", ["Mario"]),  # informazioni aggregate
+        ("rossi mario", ["Mario"]),  # in qualunque ordine
+        ("Mario, Rossi", ["Mario"]),
+        ("mario bianchi", []),  # ogni parola deve comparire
+        ("@lbianchi", ["Luigi"]),
+        ("@bianchi", ["Luigi"]),  # parte del tag
+        ("@anna", []),  # la @ cerca solo fra i tag
+        ("#3", ["Anna"]),
+        ("#33", []),
+        ("anna 333", ["Anna"]),  # nome + ID Telegram
+    ],
+)
+def test_ricerca_per_parole(registro, query, attesi):
+    trovati = [r["nome"] for r in repository.search_citizens(registro, query)]
+    assert trovati == attesi
+
+
+def test_ricerca_ignora_gli_accenti(conn):
+    repository.insert_citizen(conn, 1, None, "Nicolò", "Débora")
+    assert [r["nome"] for r in repository.search_citizens(conn, "nicolo debora")] == ["Nicolò"]
+    assert [r["nome"] for r in repository.search_citizens(conn, "NICOLÒ")] == ["Nicolò"]
+
+
+def test_ricerca_mette_prima_i_risultati_esatti(conn):
+    repository.insert_citizen(conn, 1, None, "Marianna", "Rossini")
+    repository.insert_citizen(conn, 2, None, "Mario", "Rossi")
+    trovati = [r["nome"] for r in repository.search_citizens(conn, "mario rossi")]
+    assert trovati == ["Mario"]
+    trovati = [r["nome"] for r in repository.search_citizens(conn, "mari ross")]
+    assert trovati == ["Marianna", "Mario"]  # a parità di punteggio, ordine di ID
+    trovati = [r["nome"] for r in repository.search_citizens(conn, "rossi")]
+    assert trovati == ["Mario", "Marianna"]  # parola intera prima del prefisso
+
+
+@pytest.mark.parametrize(
+    "query, attesi",
+    [
+        ("Mairo Rosi", ["Mario"]),
+        ("biachi", ["Luigi"]),
+        ("verdy", ["Anna"]),
+        ("zzzzz", []),
+        ("xy", []),  # troppo corto per tentare
+    ],
+)
+def test_suggerimenti_tolleranti_ai_refusi(registro, query, attesi):
+    trovati = [r["nome"] for r in repository.suggest_citizens(registro, query)]
+    assert trovati == attesi
+
+
+def test_cittadini_per_username(registro):
+    assert [r["nome"] for r in repository.get_citizens_by_username(registro, "@MarioRossi")] == [
+        "Mario"
+    ]
+    assert repository.get_citizens_by_username(registro, "nessuno") == []
+
+
 # ----------------------------------------------------------------------
 # Username automatico
 # ----------------------------------------------------------------------
@@ -93,10 +152,27 @@ def test_ricerca(registro, query, attesi):
 def test_update_username_cambia(conn, cittadino):
     esito = repository.update_username(conn, 12345, "nuovo_nick")
     assert esito is not None
-    precedente, nuovo = esito
-    assert precedente["username"] == "mariorossi"
-    assert nuovo == "nuovo_nick"
+    assert esito.riga["username"] == "mariorossi"
+    assert esito.nuovo == "nuovo_nick"
+    assert esito.sottratto_a == []
     assert repository.get_citizen_by_telegram_id(conn, 12345)["username"] == "nuovo_nick"
+
+
+def test_update_username_toglie_il_tag_a_chi_lo_aveva_prima(conn, cittadino):
+    """Un tag appartiene a un solo utente: chi lo usa ora ne è il titolare."""
+    altro = repository.insert_citizen(conn, 999, "vecchio", "Luigi", "Bianchi")
+    esito = repository.update_username(conn, 999, "MarioRossi")
+
+    assert [r["citizen_id"] for r in esito.sottratto_a] == [cittadino]
+    assert repository.get_citizen_by_citizen_id(conn, cittadino)["username"] is None
+    assert repository.get_citizen_by_citizen_id(conn, altro)["username"] == "MarioRossi"
+
+
+def test_update_username_di_un_non_cittadino_libera_il_tag(conn, cittadino):
+    esito = repository.update_username(conn, 999, "mariorossi")
+    assert esito.riga is None
+    assert [r["citizen_id"] for r in esito.sottratto_a] == [cittadino]
+    assert repository.get_citizen_by_citizen_id(conn, cittadino)["username"] is None
 
 
 def test_update_username_invariato_e_un_nonnulla(conn, cittadino):

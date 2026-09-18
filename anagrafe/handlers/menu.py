@@ -24,6 +24,7 @@ from ..commands import Campo, Comando, comandi_per_ruolo, trova_comando
 from ..validators import ErroreValidazione
 from .azioni import AZIONI
 from .common import rispondi, ruolo_utente
+from .controlli import PRECONDIZIONI, VERIFICHE_CAMPO
 from .importazione import ATTESA_CSV, ISTRUZIONI
 
 logger = logging.getLogger(__name__)
@@ -128,9 +129,14 @@ async def on_valore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if corrente is None:
         return await cmd_menu(update, context)
 
-    _, campo = corrente
+    comando, campo = corrente
+    verifica = VERIFICHE_CAMPO.get((comando.nome, campo.chiave))
     try:
         valore = campo.validatore(update.effective_message.text or "")
+        if verifica is not None:
+            # Controlla subito sul registro: meglio scoprire ora che l'ID non
+            # esiste che dopo aver compilato tutto il resto.
+            valore = await verifica(update, context, valore)
     except ErroreValidazione as exc:
         await rispondi(update, f"⚠️ {exc}\nRiprova.")
         return await _chiedi_campo(update, context)
@@ -173,6 +179,15 @@ async def on_scelta_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return SCELTA
 
     await query.answer()
+
+    precondizione = PRECONDIZIONI.get(comando.nome)
+    if precondizione is not None:
+        try:
+            await precondizione(update, context)
+        except ErroreValidazione as exc:
+            # L'operazione fallirebbe comunque: inutile chiedere i dati.
+            await rispondi(update, f"⚠️ {exc}")
+            return await _mostra_menu(update, context)
 
     if comando.nome == "importa":
         # L'import ha bisogno di un allegato: usciamo dal wizard e aspettiamo il file.

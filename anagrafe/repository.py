@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
+import unicodedata
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 
 from .validators import normalizza_username
 
@@ -54,20 +58,129 @@ def count_citizens(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) AS n FROM cittadini").fetchone()["n"]
 
 
-def search_citizens(conn: sqlite3.Connection, query: str) -> list[sqlite3.Row]:
-    """Cerca la stringa in nome, cognome, username o ID Telegram."""
-    pattern = f"%{query.strip()}%"
+def get_citizens_by_username(conn: sqlite3.Connection, username: str) -> list[sqlite3.Row]:
+    """Tutti i cittadini con quel tag (più di uno solo in dati vecchi e incoerenti)."""
     return conn.execute(
-        """
-        SELECT * FROM cittadini
-        WHERE nome LIKE ? COLLATE NOCASE
-           OR cognome LIKE ? COLLATE NOCASE
-           OR username LIKE ? COLLATE NOCASE
-           OR CAST(telegram_id AS TEXT) LIKE ?
-        ORDER BY citizen_id ASC
-        """,
-        (pattern, pattern, pattern, pattern),
+        "SELECT * FROM cittadini WHERE username = ? COLLATE NOCASE ORDER BY citizen_id",
+        (normalizza_username(username),),
     ).fetchall()
+
+
+# ----------------------------------------------------------------------
+# Ricerca
+# ----------------------------------------------------------------------
+
+SOGLIA_SOMIGLIANZA = 0.75
+LUNGHEZZA_MIN_FUZZY = 3
+
+
+def normalizza_testo(valore: object) -> str:
+    """Minuscolo e senza accenti: «Nicolò» e «nicolo» diventano uguali."""
+    if valore is None:
+        return ""
+    scomposto = unicodedata.normalize("NFKD", str(valore))
+    return "".join(c for c in scomposto if not unicodedata.combining(c)).casefold()
+
+
+def _token(query: str) -> list[str]:
+    return [t for t in re.split(r"[\s,]+", query.strip()) if t]
+
+
+def _parole(row: sqlite3.Row) -> list[str]:
+    """Le parole di nome, cognome e username, normalizzate."""
+    testo = f"{row['nome']} {row['cognome']} {row['username'] or ''}"
+    return normalizza_testo(testo).replace("_", " ").split()
+
+
+def _punteggio_token(token: str, row: sqlite3.Row) -> int:
+    """0 se il token non compare; altrimenti più alto quanto più è preciso."""
+    if token.startswith("#"):
+        numero = token[1:]
+        return 3 if numero.isdigit() and int(numero) == row["citizen_id"] else 0
+
+    if token.startswith("@"):
+        cercato = normalizza_testo(token[1:])
+        username = normalizza_testo(row["username"])
+        if not cercato or not username:
+            return 0
+        if username == cercato:
+            return 3
+        return 1 if cercato in username else 0
+
+    cercato = normalizza_testo(token)
+    punteggio = 0
+    if cercato.isdigit():
+        if int(cercato) == row["citizen_id"]:
+            punteggio = 2
+        if cercato in str(row["telegram_id"]):
+            punteggio = max(punteggio, 3 if cercato == str(row["telegram_id"]) else 1)
+
+    campi = [normalizza_testo(row[c]) for c in ("nome", "cognome", "username")]
+    if any(cercato in campo for campo in campi):
+        punteggio = max(punteggio, 1)
+    parole = _parole(row)
+    if cercato in parole:
+        punteggio = max(punteggio, 3)
+    elif any(parola.startswith(cercato) for parola in parole):
+        punteggio = max(punteggio, 2)
+    return punteggio
+
+
+def search_citizens(conn: sqlite3.Connection, query: str) -> list[sqlite3.Row]:
+    """Ogni parola della query deve comparire in almeno un campo.
+
+    «Mario Rossi», «rossi mario», «@mariorossi», «#3» e l'ID Telegram trovano
+    tutti lo stesso cittadino. Maiuscole e accenti sono ignorati. I risultati
+    più precisi (nome e cognome esatti, parola intera, inizio di parola)
+    vengono prima.
+    """
+    token = _token(query)
+    if not token:
+        return []
+    frase = normalizza_testo(" ".join(token))
+
+    trovati: list[tuple[int, int, sqlite3.Row]] = []
+    for row in list_citizens(conn):
+        punteggi = [_punteggio_token(t, row) for t in token]
+        if not all(punteggi):
+            continue
+        nome = normalizza_testo(row["nome"])
+        cognome = normalizza_testo(row["cognome"])
+        esatto = frase in (f"{nome} {cognome}", f"{cognome} {nome}")
+        totale = sum(punteggi) + (100 if esatto else 0)
+        trovati.append((-totale, row["citizen_id"], row))
+
+    trovati.sort(key=lambda t: t[:2])
+    return [row for _, _, row in trovati]
+
+
+def suggest_citizens(
+    conn: sqlite3.Connection, query: str, limite: int = 5
+) -> list[sqlite3.Row]:
+    """Ricerca tollerante ai refusi, da usare quando search_citizens è vuota."""
+    token = [
+        normalizza_testo(t.lstrip("@#"))
+        for t in _token(query)
+        if len(t.lstrip("@#")) >= LUNGHEZZA_MIN_FUZZY
+    ]
+    if not token:
+        return []
+
+    candidati: list[tuple[float, int, sqlite3.Row]] = []
+    for row in list_citizens(conn):
+        parole = _parole(row)
+        if row["username"]:
+            parole.append(normalizza_testo(row["username"]))
+        if not parole:
+            continue
+        migliori = [
+            max(SequenceMatcher(None, t, p).ratio() for p in parole) for t in token
+        ]
+        if min(migliori) >= SOGLIA_SOMIGLIANZA:
+            candidati.append((-sum(migliori) / len(migliori), row["citizen_id"], row))
+
+    candidati.sort(key=lambda c: c[:2])
+    return [row for _, _, row in candidati[:limite]]
 
 
 def insert_citizen(
@@ -113,27 +226,54 @@ def delete_citizen(conn: sqlite3.Connection, citizen_id: int) -> sqlite3.Row | N
     return row
 
 
+@dataclass
+class CambioUsername:
+    """Esito di update_username.
+
+    `riga` è il cittadino prima del cambio (None se chi ha scritto non è
+    cittadino); `sottratto_a` sono i cittadini che avevano quel tag in modo
+    ormai obsoleto e ne sono stati privati.
+    """
+
+    riga: sqlite3.Row | None
+    nuovo: str | None
+    sottratto_a: list[sqlite3.Row] = field(default_factory=list)
+
+
 def update_username(
     conn: sqlite3.Connection, telegram_id: int, username: str | None
-) -> tuple[sqlite3.Row, str | None] | None:
-    """Aggiorna lo username di un cittadino.
+) -> CambioUsername | None:
+    """Registra il tag attuale di un utente Telegram.
 
-    Restituisce (riga_precedente, nuovo_username) se qualcosa è cambiato,
-    None se il cittadino non esiste o se lo username era già quello.
+    Aggiorna lo username del cittadino con quel telegram_id, se esiste. Poiché
+    un tag Telegram appartiene a un solo utente alla volta, chi lo usa adesso
+    ne è il titolare: lo si toglie a qualunque altro cittadino lo avesse
+    ancora registrato. Restituisce None se non è cambiato nulla.
     """
-    row = get_citizen_by_telegram_id(conn, telegram_id)
-    if row is None:
-        return None
-
     nuovo = normalizza_username(username)
-    if row["username"] == nuovo:
-        return None
+    row = get_citizen_by_telegram_id(conn, telegram_id)
 
-    conn.execute(
-        "UPDATE cittadini SET username = ? WHERE telegram_id = ?", (nuovo, telegram_id)
-    )
+    sottratto_a: list[sqlite3.Row] = []
+    if nuovo is not None:
+        sottratto_a = [
+            r for r in get_citizens_by_username(conn, nuovo) if r["telegram_id"] != telegram_id
+        ]
+        for r in sottratto_a:
+            conn.execute(
+                "UPDATE cittadini SET username = NULL WHERE citizen_id = ?",
+                (r["citizen_id"],),
+            )
+
+    cambiato = row is not None and row["username"] != nuovo
+    if cambiato:
+        conn.execute(
+            "UPDATE cittadini SET username = ? WHERE telegram_id = ?", (nuovo, telegram_id)
+        )
+
+    if not cambiato and not sottratto_a:
+        return None
     conn.commit()
-    return row, nuovo
+    return CambioUsername(riga=row if cambiato else None, nuovo=nuovo, sottratto_a=sottratto_a)
 
 
 # ----------------------------------------------------------------------
