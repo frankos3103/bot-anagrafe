@@ -5,6 +5,7 @@ import pytest
 from anagrafe import controlli, repository
 from anagrafe.validators import (
     RIF_CITIZEN_ID,
+    RIF_NUMERO,
     RIF_TELEGRAM_ID,
     RIF_USERNAME,
     ErroreValidazione,
@@ -59,6 +60,26 @@ def test_risolvi_cittadino(conn, cittadino, rif):
 def test_risolvi_cittadino_inesistente(conn, cittadino, rif):
     with pytest.raises(ErroreValidazione, match=str(rif)):
         controlli.risolvi_cittadino(conn, rif)
+
+
+def test_numero_nudo_vale_come_id_cittadino_o_telegram(conn, cittadino):
+    """Chi rimuove non deve ricordarsi quale dei due ID sta scrivendo."""
+    per_id = controlli.risolvi_cittadino(conn, Riferimento(RIF_NUMERO, cittadino))
+    per_telegram = controlli.risolvi_cittadino(conn, Riferimento(RIF_NUMERO, 12345))
+    assert per_id["citizen_id"] == per_telegram["citizen_id"] == cittadino
+
+
+def test_numero_nudo_inesistente(conn, cittadino):
+    with pytest.raises(ErroreValidazione, match="ID cittadino o ID Telegram 999"):
+        controlli.risolvi_cittadino(conn, Riferimento(RIF_NUMERO, 999))
+
+
+def test_numero_nudo_ambiguo(conn):
+    """Il numero è l'ID cittadino di uno e l'ID Telegram di un altro."""
+    primo = repository.insert_citizen(conn, 50, None, "Mario", "Rossi")
+    secondo = repository.insert_citizen(conn, primo, None, "Luigi", "Bianchi")
+    with pytest.raises(ErroreValidazione, match=f"#{primo}.*#{secondo}"):
+        controlli.risolvi_cittadino(conn, Riferimento(RIF_NUMERO, primo))
 
 
 def test_tag_ambiguo_chiede_lid(conn):

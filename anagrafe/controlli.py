@@ -15,6 +15,7 @@ from . import repository
 from .roles import RoleRegistry
 from .validators import (
     RIF_CITIZEN_ID,
+    RIF_NUMERO,
     RIF_TELEGRAM_ID,
     ErroreValidazione,
     Riferimento,
@@ -37,6 +38,22 @@ def precondizione_richiedi(conn: sqlite3.Connection, telegram_id: int) -> None:
 
 def risolvi_cittadino(conn: sqlite3.Connection, rif: Riferimento) -> sqlite3.Row:
     """Trova il cittadino indicato per #ID, @tag o ID Telegram."""
+    if rif.tipo == RIF_NUMERO:
+        per_id = repository.get_citizen_by_citizen_id(conn, rif.valore)
+        per_telegram = repository.get_citizen_by_telegram_id(conn, rif.valore)
+        if per_id and per_telegram and per_id["citizen_id"] != per_telegram["citizen_id"]:
+            raise ErroreValidazione(
+                f"{rif.valore} è sia l'ID del cittadino #{per_id['citizen_id']} sia "
+                f"l'ID Telegram del cittadino #{per_telegram['citizen_id']}: "
+                f"scrivi #{rif.valore} per il primo o @username per il secondo."
+            )
+        riga = per_id or per_telegram
+        if riga is None:
+            raise ErroreValidazione(
+                f"Nessun cittadino con ID cittadino o ID Telegram {rif.valore}."
+            )
+        return riga
+
     if rif.tipo == RIF_CITIZEN_ID:
         riga = repository.get_citizen_by_citizen_id(conn, rif.valore)
     elif rif.tipo == RIF_TELEGRAM_ID:

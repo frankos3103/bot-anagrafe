@@ -169,14 +169,14 @@ COMMANDS: tuple[Comando, ...] = (
         ruolo=Role.ADMIN,
         emoji="❌",
         descrizione="Rimuove un cittadino dal registro",
-        uso="/rimuovi <ID_cittadino | @username>",
+        uso="/rimuovi <ID_cittadino | ID_telegram | @username>",
         esempio="/rimuovi 12 oppure /rimuovi @mariorossi",
         etichetta_menu="Rimuovi",
         campi=(
             Campo(
                 "cittadino",
                 "Cittadino",
-                "Quale cittadino vuoi rimuovere? (ID cittadino, il numero dopo #, "
+                "Quale cittadino vuoi rimuovere? (ID cittadino, ID Telegram "
                 "oppure @username)",
                 valida_riferimento_cittadino,
             ),

@@ -110,7 +110,7 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | Comando | Cosa fa |
 |---|---|
 | `/inserisci <ID_telegram>, <username>, <nome>, <cognome>` | Inserisce un cittadino. Lo username può essere lasciato vuoto. |
-| `/rimuovi <ID_cittadino \| @username>` | Rimuove il cittadino con quell'ID (il numero dopo `#`) o con quel tag. |
+| `/rimuovi <ID_cittadino | ID_telegram | @username>` | Rimuove il cittadino indicato per ID cittadino (il numero dopo `#`), ID Telegram o tag. |
 | `/importa` | Importa più cittadini da un file CSV (vedi sotto). |
 
 ### Root

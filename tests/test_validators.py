@@ -4,6 +4,7 @@ import pytest
 
 from anagrafe.validators import (
     RIF_CITIZEN_ID,
+    RIF_NUMERO,
     RIF_TELEGRAM_ID,
     RIF_USERNAME,
     ErroreValidazione,
@@ -128,6 +129,7 @@ def test_parse_richiedi_non_valido(grezzo):
         ("@mariorossi", RIF_TELEGRAM_ID, Riferimento(RIF_USERNAME, "mariorossi")),
         ("#12", RIF_TELEGRAM_ID, Riferimento(RIF_CITIZEN_ID, 12)),
         (" 12 ", RIF_CITIZEN_ID, Riferimento(RIF_CITIZEN_ID, 12)),
+        (" 12 ", RIF_NUMERO, Riferimento(RIF_NUMERO, 12)),
         ("123456789", RIF_TELEGRAM_ID, Riferimento(RIF_TELEGRAM_ID, 123456789)),
     ],
 )

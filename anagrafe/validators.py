@@ -100,6 +100,9 @@ def valida_username_opzionale(valore: str) -> str | None:
 RIF_CITIZEN_ID = "citizen_id"
 RIF_TELEGRAM_ID = "telegram_id"
 RIF_USERNAME = "username"
+# Numero senza # in un comando che riguarda un cittadino: può essere sia l'ID
+# cittadino sia l'ID Telegram, chi scrive non deve ricordarsi quale dei due.
+RIF_NUMERO = "numero"
 
 
 @dataclass(frozen=True)
@@ -116,7 +119,8 @@ class Riferimento:
 
 
 def parse_riferimento(valore: str, default: str) -> Riferimento:
-    """«@mario» -> tag, «#12» -> ID cittadino, «12» -> il tipo `default`."""
+    """«@mario» -> tag, «#12» -> ID cittadino, «12» -> il tipo `default`
+    (RIF_CITIZEN_ID, RIF_TELEGRAM_ID o RIF_NUMERO)."""
     testo = str(valore).strip()
     if not testo:
         raise ErroreValidazione("Indica un ID o un @username.")
@@ -129,12 +133,14 @@ def parse_riferimento(valore: str, default: str) -> Riferimento:
         return Riferimento(RIF_CITIZEN_ID, valida_citizen_id(testo))
     if default == RIF_CITIZEN_ID:
         return Riferimento(RIF_CITIZEN_ID, valida_citizen_id(testo))
+    if default == RIF_NUMERO:
+        return Riferimento(RIF_NUMERO, valida_citizen_id(testo))
     return Riferimento(RIF_TELEGRAM_ID, valida_telegram_id(testo))
 
 
 def valida_riferimento_cittadino(valore: str) -> Riferimento:
-    """Per /rimuovi: un numero nudo è un ID cittadino."""
-    return parse_riferimento(valore, RIF_CITIZEN_ID)
+    """Per /rimuovi: un numero nudo è un ID cittadino o un ID Telegram."""
+    return parse_riferimento(valore, RIF_NUMERO)
 
 
 def valida_riferimento_utente(valore: str) -> Riferimento:
