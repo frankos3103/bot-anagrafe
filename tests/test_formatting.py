@@ -25,11 +25,11 @@ def riga(citizen_id=1, telegram_id=111, username="mariorossi", nome="Mario", cog
 
 
 def test_format_row_con_username():
-    assert format_row(riga()) == "#1 — 111 — Mario Rossi (@mariorossi)"
+    assert format_row(riga()) == "#1 — 111 — Mario ROSSI (@mariorossi)"
 
 
 def test_format_row_senza_username():
-    assert format_row(riga(username=None)) == "#1 — 111 — Mario Rossi (nessuno username)"
+    assert format_row(riga(username=None)) == "#1 — 111 — Mario ROSSI (nessuno username)"
 
 
 def test_username_o_placeholder():
@@ -55,10 +55,22 @@ def test_escape_tabella():
     assert escape_tabella("a\nb") == "a b"
 
 
+@pytest.mark.parametrize("cognome", ["Zaccaria", "ZACCARIA", "zaccaria", "zAcCaRiA"])
+def test_il_cognome_negli_elenchi_e_sempre_maiuscolo(cognome):
+    dati = riga(nome="Giovanni", cognome=cognome)
+    assert "*Giovanni ZACCARIA*" in riga_elenco(dati)
+    assert "Giovanni ZACCARIA" in format_row(dati)
+    assert "| Giovanni | ZACCARIA |" in tabella_markdown([dati], 1)
+
+
+def test_cognome_accentato_in_maiuscolo():
+    assert "ERÉSIA" in format_row(riga(cognome="Erésia"))
+
+
 def test_riga_elenco_sfugge_i_caratteri_speciali():
     prodotta = riga_elenco(riga(nome="Gian_Luca", cognome="De-Rossi", username=None))
     assert r"Gian\_Luca" in prodotta
-    assert r"De\-Rossi" in prodotta
+    assert r"DE\-ROSSI" in prodotta
     assert "nessuno username" in prodotta
 
 
@@ -111,8 +123,8 @@ def test_tabella_markdown():
     testo = tabella_markdown([riga(), riga(2, 222, None, "Luigi", "Bianchi")], 2)
     assert "# Registro Cittadini" in testo
     assert "Totale cittadini: 2" in testo
-    assert "| 1 | 111 | @mariorossi | Mario | Rossi |" in testo
-    assert "| 2 | 222 |  | Luigi | Bianchi |" in testo
+    assert "| 1 | 111 | @mariorossi | Mario | ROSSI |" in testo
+    assert "| 2 | 222 |  | Luigi | BIANCHI |" in testo
     assert testo.endswith("\n")
 
 

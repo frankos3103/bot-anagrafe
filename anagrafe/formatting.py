@@ -27,6 +27,11 @@ def escape_tabella(valore: object) -> str:
     return str(valore).replace("|", r"\|").replace("\n", " ")
 
 
+def cognome_elenco(cognome: object) -> str:
+    """Negli elenchi il cognome è sempre in maiuscolo, comunque sia stato scritto."""
+    return str(cognome or "").upper()
+
+
 def username_o_placeholder(username: str | None, placeholder: str = "(nessuno username)") -> str:
     return f"@{username}" if username else placeholder
 
@@ -37,14 +42,14 @@ def format_row(row: Mapping) -> str:
     utente = username_o_placeholder(row["username"], "nessuno username")
     return (
         f"#{row['citizen_id']} — {row['telegram_id']} — "
-        f"{row['nome']} {row['cognome']} ({utente})"
+        f"{row['nome']} {cognome_elenco(row['cognome'])} ({utente})"
     )
 
 
 def riga_elenco(row: Mapping) -> str:
     """Riga in MarkdownV2 usata da /elenco: «• *Mario Rossi* — @mariorossi»."""
     nome = escape_markdown_v2(row["nome"])
-    cognome = escape_markdown_v2(row["cognome"])
+    cognome = escape_markdown_v2(cognome_elenco(row["cognome"]))
     if row["username"]:
         utente = f"@{escape_markdown_v2(row['username'])}"
     else:
@@ -104,7 +109,7 @@ def tabella_markdown(righe: Iterable[Mapping], totale: int) -> str:
                 tid=row["telegram_id"],
                 username=escape_tabella(username),
                 nome=escape_tabella(row["nome"]),
-                cognome=escape_tabella(row["cognome"]),
+                cognome=escape_tabella(cognome_elenco(row["cognome"])),
             )
         )
     return "\n".join(linee) + "\n"

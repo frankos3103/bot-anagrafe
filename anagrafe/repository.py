@@ -46,12 +46,15 @@ def get_citizen_by_citizen_id(conn: sqlite3.Connection, citizen_id: int) -> sqli
 
 
 def list_citizens(conn: sqlite3.Connection, ordine: str = "citizen_id") -> list[sqlite3.Row]:
-    """ordine: 'citizen_id' (ordine di registrazione) oppure 'nome' (alfabetico)."""
+    """ordine: 'citizen_id' (ordine di registrazione) oppure 'nome' (alfabetico).
+
+    L'ordine alfabetico ignora maiuscole e accenti: il COLLATE NOCASE di SQLite
+    vale solo per l'ASCII e metterebbe «Élodie» dopo «Zeno».
+    """
+    righe = conn.execute("SELECT * FROM cittadini ORDER BY citizen_id ASC").fetchall()
     if ordine == "nome":
-        sql = "SELECT * FROM cittadini ORDER BY nome COLLATE NOCASE, cognome COLLATE NOCASE"
-    else:
-        sql = "SELECT * FROM cittadini ORDER BY citizen_id ASC"
-    return conn.execute(sql).fetchall()
+        righe.sort(key=lambda r: (normalizza_testo(r["nome"]), normalizza_testo(r["cognome"])))
+    return righe
 
 
 def count_citizens(conn: sqlite3.Connection) -> int:

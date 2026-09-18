@@ -56,6 +56,16 @@ def test_ordinamenti(conn):
     assert per_nome == ["Anna", "Zeno"]
 
 
+def test_ordine_alfabetico_ignora_maiuscole_e_accenti(conn):
+    repository.insert_citizen(conn, 1, None, "zeno", "Zeta")
+    repository.insert_citizen(conn, 2, None, "Élodie", "Alfa")
+    repository.insert_citizen(conn, 3, None, "anna", "Beta")
+    repository.insert_citizen(conn, 4, None, "Bruno", "Gamma")
+
+    per_nome = [r["nome"] for r in repository.list_citizens(conn, ordine="nome")]
+    assert per_nome == ["anna", "Bruno", "Élodie", "zeno"]
+
+
 # ----------------------------------------------------------------------
 # Ricerca
 # ----------------------------------------------------------------------
