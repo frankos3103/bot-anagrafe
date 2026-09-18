@@ -50,7 +50,8 @@ def _e_un_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     didascalia = (update.effective_message.caption or "").strip().lower()
     if didascalia.startswith("/importa"):
         return True
-    return bool(context.user_data.get(ATTESA_CSV))
+    # Senza utente (es. post di un canale) user_data è None.
+    return bool(context.user_data and context.user_data.get(ATTESA_CSV))
 
 
 async def on_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

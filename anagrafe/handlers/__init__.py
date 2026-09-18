@@ -61,14 +61,20 @@ def registra_handlers(application: Application) -> None:
         CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:")
     )
 
-    # 4. Gli allegati (import CSV).
-    application.add_handler(MessageHandler(filters.Document.ALL, on_documento))
+    # 4. Gli allegati (import CSV). Solo messaggi di utenti: un MessageHandler
+    #    con filtri espliciti riceve anche i post dei canali in cui il bot è
+    #    amministratore, e ogni file pubblicato lì finirebbe qui.
+    application.add_handler(
+        MessageHandler(filters.UpdateType.MESSAGE & filters.Document.ALL, on_documento)
+    )
 
     # 5. Catch-all: comandi sconosciuti ovunque, testo libero solo in privato
     #    (altrimenti il bot risponderebbe a ogni chiacchiera di gruppo).
     application.add_handler(
         MessageHandler(
-            filters.COMMAND | (filters.ChatType.PRIVATE & filters.TEXT), catch_all
+            filters.UpdateType.MESSAGE
+            & (filters.COMMAND | (filters.ChatType.PRIVATE & filters.TEXT)),
+            catch_all,
         )
     )
 

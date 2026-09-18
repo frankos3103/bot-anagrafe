@@ -72,7 +72,11 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     Senza questo, un errore imprevisto lascerebbe l'utente senza risposta.
     """
     logger.exception("Errore non gestito", exc_info=context.error)
-    if isinstance(update, Update):
+    # In un canale non c'è nessuno da avvisare: la risposta finirebbe
+    # pubblicata sotto il post.
+    if isinstance(update, Update) and not (
+        update.effective_chat and update.effective_chat.type == "channel"
+    ):
         try:
             await rispondi(
                 update,
