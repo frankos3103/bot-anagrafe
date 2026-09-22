@@ -20,13 +20,13 @@ def nomi(ruolo, solo_menu=False):
 def test_il_pubblico_non_vede_i_comandi_riservati():
     visibili = nomi(Role.PUBBLICO)
     assert {"elenco", "esporta", "cerca", "richiedi", "help", "menu"} <= visibili
-    assert not visibili & {"inserisci", "rimuovi", "importa"}
+    assert not visibili & {"inserisci", "rimuovi", "importa", "tagall"}
     assert not visibili & {"aggiungi_admin", "rimuovi_admin", "elenco_admin"}
 
 
 def test_ladmin_vede_anche_i_comandi_admin():
     visibili = nomi(Role.ADMIN)
-    assert {"inserisci", "rimuovi", "importa", "elenco"} <= visibili
+    assert {"inserisci", "rimuovi", "importa", "elenco", "tagall"} <= visibili
     assert not visibili & {"aggiungi_admin", "rimuovi_admin", "elenco_admin"}
 
 

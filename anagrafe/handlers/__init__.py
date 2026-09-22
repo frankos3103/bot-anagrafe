@@ -38,6 +38,7 @@ COMANDI = {
     "richiedi": comandi.cmd_richiedi,
     "inserisci": comandi.cmd_inserisci,
     "rimuovi": comandi.cmd_rimuovi,
+    "tagall": comandi.cmd_tagall,
     "importa": cmd_importa,
     "aggiungi_admin": comandi.cmd_aggiungi_admin,
     "rimuovi_admin": comandi.cmd_rimuovi_admin,

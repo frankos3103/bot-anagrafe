@@ -9,6 +9,12 @@ LIMITE_MESSAGGIO = 3800
 
 CARATTERI_MARKDOWN_V2 = r"_*[]()~`>#+-=|{}.!"
 
+# Telegram trasforma automaticamente "@username" in una menzione che notifica
+# la persona, indipendentemente dal parse_mode. Uno spazio a larghezza zero
+# subito dopo la @ è invisibile ma rompe il riconoscimento, così negli elenchi
+# lo username si vede senza taggare nessuno.
+SPAZIO_LARGHEZZA_ZERO = "​"
+
 
 def escape_markdown_v2(valore: object) -> str:
     """Sfugge i caratteri speciali richiesti da Telegram in modalità MarkdownV2."""
@@ -33,13 +39,19 @@ def cognome_elenco(cognome: object) -> str:
 
 
 def username_o_placeholder(username: str | None, placeholder: str = "(nessuno username)") -> str:
+    """Tag vero e proprio (notifica l'utente): solo per /tagall."""
     return f"@{username}" if username else placeholder
+
+
+def username_senza_tag(username: str | None, placeholder: str = "(nessuno username)") -> str:
+    """Mostra lo username negli elenchi senza generare una menzione/notifica."""
+    return f"@{SPAZIO_LARGHEZZA_ZERO}{username}" if username else placeholder
 
 
 def format_row(row: Mapping) -> str:
     """Riga compatta usata da /cerca: «#3 — 12345 — Mario Rossi (@mariorossi)»."""
     # Il placeholder qui è senza parentesi: le mette la riga stessa.
-    utente = username_o_placeholder(row["username"], "nessuno username")
+    utente = username_senza_tag(row["username"], "nessuno username")
     return (
         f"#{row['citizen_id']} — {row['telegram_id']} — "
         f"{row['nome']} {cognome_elenco(row['cognome'])} ({utente})"
@@ -51,7 +63,7 @@ def riga_elenco(row: Mapping) -> str:
     nome = escape_markdown_v2(row["nome"])
     cognome = escape_markdown_v2(cognome_elenco(row["cognome"]))
     if row["username"]:
-        utente = f"@{escape_markdown_v2(row['username'])}"
+        utente = f"@{SPAZIO_LARGHEZZA_ZERO}{escape_markdown_v2(row['username'])}"
     else:
         utente = r"_\(nessuno username\)_"
     return f"• *{nome} {cognome}* — {utente}"

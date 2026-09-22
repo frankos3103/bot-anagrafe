@@ -4,6 +4,7 @@ import pytest
 
 from anagrafe.formatting import (
     LIMITE_MESSAGGIO,
+    SPAZIO_LARGHEZZA_ZERO,
     escape_markdown_v2,
     escape_tabella,
     format_row,
@@ -11,6 +12,7 @@ from anagrafe.formatting import (
     spezza_in_blocchi,
     tabella_markdown,
     username_o_placeholder,
+    username_senza_tag,
 )
 
 
@@ -25,16 +27,28 @@ def riga(citizen_id=1, telegram_id=111, username="mariorossi", nome="Mario", cog
 
 
 def test_format_row_con_username():
-    assert format_row(riga()) == "#1 — 111 — Mario ROSSI (@mariorossi)"
+    assert format_row(riga()) == f"#1 — 111 — Mario ROSSI (@{SPAZIO_LARGHEZZA_ZERO}mariorossi)"
 
 
 def test_format_row_senza_username():
     assert format_row(riga(username=None)) == "#1 — 111 — Mario ROSSI (nessuno username)"
 
 
+def test_format_row_non_tagga_nessuno():
+    # Niente "@" seguito subito dallo username: Telegram non deve riconoscerlo
+    # come menzione e notificare la persona.
+    assert "@mariorossi" not in format_row(riga())
+
+
 def test_username_o_placeholder():
+    """Tag vero e proprio: usato solo da /tagall."""
     assert username_o_placeholder("tizio") == "@tizio"
     assert username_o_placeholder(None) == "(nessuno username)"
+
+
+def test_username_senza_tag():
+    assert username_senza_tag("tizio") == f"@{SPAZIO_LARGHEZZA_ZERO}tizio"
+    assert username_senza_tag(None) == "(nessuno username)"
 
 
 @pytest.mark.parametrize(
@@ -72,6 +86,12 @@ def test_riga_elenco_sfugge_i_caratteri_speciali():
     assert r"Gian\_Luca" in prodotta
     assert r"DE\-ROSSI" in prodotta
     assert "nessuno username" in prodotta
+
+
+def test_riga_elenco_non_tagga_nessuno():
+    prodotta = riga_elenco(riga(username="mariorossi"))
+    assert "@mariorossi" not in prodotta
+    assert f"@{SPAZIO_LARGHEZZA_ZERO}mariorossi" in prodotta
 
 
 # ----------------------------------------------------------------------

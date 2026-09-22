@@ -183,6 +183,14 @@ COMMANDS: tuple[Comando, ...] = (
         ),
     ),
     Comando(
+        nome="tagall",
+        ruolo=Role.ADMIN,
+        emoji="📣",
+        descrizione="Tagga tutti i cittadini con uno username",
+        uso="/tagall",
+        etichetta_menu="Tagga tutti",
+    ),
+    Comando(
         nome="importa",
         ruolo=Role.ADMIN,
         emoji="📥",

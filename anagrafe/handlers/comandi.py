@@ -24,6 +24,7 @@ from .azioni import (
     azione_richiedi,
     azione_rimuovi,
     azione_rimuovi_admin,
+    azione_tagall,
 )
 from .common import rispondi, ruolo_utente
 from .controlli import PRECONDIZIONI
@@ -122,6 +123,10 @@ async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _errore_uso(update, "rimuovi", exc)
         return
     await azione_rimuovi(update, context, {"cittadino": cittadino})
+
+
+async def cmd_tagall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await azione_tagall(update, context, {})
 
 
 # ----------------------------------------------------------------------

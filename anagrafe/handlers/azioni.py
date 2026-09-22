@@ -22,6 +22,7 @@ from ..formatting import (
     riga_elenco,
     spezza_in_blocchi,
     tabella_markdown,
+    username_o_placeholder,
 )
 from ..logbook import fmt_username, fmt_utente, send_log
 from ..roles import ETICHETTE_RUOLO, Role
@@ -241,6 +242,31 @@ async def azione_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE, val
     )
 
 
+@richiede(Role.ADMIN)
+async def azione_tagall(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+    with db(context) as conn:
+        righe = repository.list_citizens(conn, ordine="nome")
+
+    if not righe:
+        await rispondi(update, "Il registro è vuoto.")
+        return
+
+    tag = [username_o_placeholder(r["username"]) for r in righe if r["username"]]
+    senza_username = [r for r in righe if not r["username"]]
+
+    if tag:
+        intestazione = f"📣 Tag di tutti i cittadini ({len(tag)})"
+        for blocco in spezza_in_blocchi(tag, intestazione):
+            await rispondi(update, blocco)
+
+    if senza_username:
+        nomi = ", ".join(f"{r['nome']} {r['cognome']}" for r in senza_username)
+        await rispondi(
+            update,
+            f"⚠️ Non taggabili perché senza username: {nomi}",
+        )
+
+
 # ----------------------------------------------------------------------
 # Comandi root
 # ----------------------------------------------------------------------
@@ -345,6 +371,7 @@ AZIONI = {
     "richiedi": azione_richiedi,
     "inserisci": azione_inserisci,
     "rimuovi": azione_rimuovi,
+    "tagall": azione_tagall,
     "elenco_admin": azione_elenco_admin,
     "aggiungi_admin": azione_aggiungi_admin,
     "rimuovi_admin": azione_rimuovi_admin,
