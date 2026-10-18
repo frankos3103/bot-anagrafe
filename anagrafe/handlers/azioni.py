@@ -12,7 +12,6 @@ import io
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
-from telegram.error import Forbidden, TelegramError
 from telegram.ext import ContextTypes
 
 from .. import controlli, repository
@@ -27,7 +26,13 @@ from ..formatting import (
 from ..logbook import fmt_username, fmt_utente, send_log
 from ..roles import ETICHETTE_RUOLO, Role
 from ..validators import ErroreValidazione
+from .attivita import (
+    azione_attivita,
+    azione_elenco_attivita,
+    azione_modera_attivita,
+)
 from .common import db, get_roles, richiede, rispondi, ruolo_utente
+from .notifiche import invia_notifiche_admin
 
 logger = logging.getLogger(__name__)
 
@@ -132,27 +137,9 @@ async def azione_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE, va
         "Puoi accettarla o rifiutarla con i pulsanti qui sotto."
     )
 
-    admin_ids = get_roles(context).tutti_gli_admin()
-    non_raggiungibili: list[int] = []
-    notifiche: list[list[int]] = []
-
-    for admin_id in admin_ids:
-        try:
-            inviato = await context.bot.send_message(
-                chat_id=admin_id, text=testo_notifica, reply_markup=tastiera
-            )
-            notifiche.append([inviato.chat_id, inviato.message_id])
-        except Forbidden:
-            # L'admin non ha mai avviato una chat privata con il bot.
-            non_raggiungibili.append(admin_id)
-            logger.warning(
-                "Impossibile notificare l'admin %s: deve avviare prima una chat "
-                "privata con il bot (/start).",
-                admin_id,
-            )
-        except TelegramError as exc:
-            non_raggiungibili.append(admin_id)
-            logger.warning("Errore inviando la notifica all'admin %s: %s", admin_id, exc)
+    notifiche, non_raggiungibili = await invia_notifiche_admin(
+        context, get_roles(context).tutti_gli_admin(), testo_notifica, tastiera
+    )
 
     with db(context) as conn:
         repository.set_request_notifications(conn, request_id, notifiche)
@@ -372,6 +359,11 @@ AZIONI = {
     "inserisci": azione_inserisci,
     "rimuovi": azione_rimuovi,
     "tagall": azione_tagall,
+    # Il Registro delle Attività vive in handlers/attivita.py: qui entra solo
+    # nel dict, che è quello che il wizard di /menu esegue alla conferma.
+    "attivita": azione_attivita,
+    "elenco_attivita": azione_elenco_attivita,
+    "modera_attivita": azione_modera_attivita,
     "elenco_admin": azione_elenco_admin,
     "aggiungi_admin": azione_aggiungi_admin,
     "rimuovi_admin": azione_rimuovi_admin,

@@ -3,8 +3,8 @@
 Bot Telegram per la gestione del registro cittadini di una simulazione politica.
 
 Tiene l'elenco dei cittadini in un database SQLite, gestisce le richieste di
-cittadinanza con approvazione da parte degli amministratori, e registra ogni
-modifica su un canale Telegram di log.
+cittadinanza con approvazione da parte degli amministratori, cura il Registro
+Pubblico delle Attività, e registra ogni modifica su un canale Telegram di log.
 
 ---
 
@@ -18,6 +18,11 @@ modifica su un canale Telegram di log.
 - **Gestione del registro** riservata agli amministratori: inserimento singolo
   (`/inserisci`), rimozione (`/rimuovi`) e **import di massa da CSV**
   (`/importa`).
+- **Registro Pubblico delle Attività** (`/attivita`, `/elenco_attivita`):
+  ogni cittadino iscrive gratuitamente la propria organizzazione, associazione
+  o attività privata. L'iscrizione è immediata, la scheda viene pubblicata
+  sulla Gazzetta Ciompista e il Ministero dell'Interno può rifiutarla o
+  eliminarla d'ufficio *dopo* (vedi sotto).
 - **Tre livelli di autorizzazione**: pubblico, amministratore, root.
 - **Pulsantiera guidata** (`/menu`): esegue tutti i comandi senza doverne
   ricordare la sintassi, chiedendo i dati un campo alla volta.
@@ -73,6 +78,7 @@ cp .env.example .env
 | `TOKEN_CITIZENS_BOT` | ✅ | Token del bot, fornito da @BotFather. |
 | `ROOT_ADMIN_ID` | ✅ | ID Telegram numerico dell'utente root. Per scoprirlo scrivi a [@userinfobot](https://t.me/userinfobot). |
 | `LOG_CHANNEL_ID` | — | Canale su cui registrare le modifiche: ID numerico (`-1001234567890`) o `@nomecanale`. Se vuoto, il log su canale è disattivato. |
+| `GAZZETTA_CHANNEL_ID` | — | Canale della Gazzetta Ciompista, dove viene pubblicata una scheda per ogni attività iscritta: ID numerico o `@nomecanale`. Se vuoto, le attività vengono registrate ma non pubblicate. |
 | `ANAGRAFE_DB_PATH` | — | Percorso del database SQLite. Default: `./registro.db`. |
 | `ANAGRAFE_ADMINS_PATH` | — | Percorso dell'elenco amministratori. Default: `./admins.txt`. |
 
@@ -104,6 +110,8 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | `/esporta` | Invia il registro come file Markdown. |
 | `/cerca <testo>` | Cerca per nome e/o cognome (in qualunque ordine), `@username`, `#ID` o ID Telegram. Senza risultati esatti propone i nomi più simili. |
 | `/richiedi <nome>, <cognome>` | Invia una richiesta di cittadinanza. |
+| `/attivita` | Iscrive una tua attività al Registro Pubblico. Procedura guidata a passi; richiede la cittadinanza. |
+| `/elenco_attivita` | Elenco delle attività iscritte al Registro Pubblico. |
 
 ### Amministratori
 
@@ -112,6 +120,7 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | `/inserisci <ID_telegram>, <username>, <nome>, <cognome>` | Inserisce un cittadino. Lo username può essere lasciato vuoto. |
 | `/rimuovi <ID_cittadino | ID_telegram | @username>` | Rimuove il cittadino indicato per ID cittadino (il numero dopo `#`), ID Telegram o tag. |
 | `/importa` | Importa più cittadini da un file CSV (vedi sotto). |
+| `/modera_attivita <ID_attività>` | Rimanda la scheda di un'attività con i pulsanti *Rifiuta* / *Elimina*, utile se la notifica è andata perduta. |
 
 ### Root
 
@@ -132,6 +141,12 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 - Gli altri aprono un **wizard**: il bot chiede un valore alla volta
   («Qual è il nome?», «Qual è il cognome?»), valida ogni risposta e chiude con
   un riepilogo da confermare. I campi facoltativi hanno un pulsante *Salta*.
+- Alcuni campi si compilano **a pulsanti** invece che a mano (la tipologia di
+  un'attività, per esempio). Si può comunque scrivere la risposta: il bot
+  riconosce sia l'etichetta del pulsante sia la forma senza accenti.
+- Alcuni comandi (`/attivita`) entrano **direttamente nel proprio wizard**
+  quando li digiti, senza passare dalla pulsantiera. Il testo scritto dopo il
+  comando viene ignorato: i dati si danno un passo alla volta.
 - *Annulla* interrompe in qualsiasi momento; il comando `/annulla` fa lo stesso.
 - Dopo 5 minuti di inattività il wizard scade da solo.
 
@@ -194,6 +209,51 @@ riavviare il bot. Le righe vuote e quelle che iniziano con `#` sono ignorate.
 
 ---
 
+## Registro Pubblico delle Attività
+
+Istituito dal **Decreto Ministeriale n. 3 del 13 ottobre 2026**. L'iscrizione è
+gratuita e **non richiede approvazione preventiva**: il controllo del Ministero
+dell'Interno è *successivo*.
+
+**1. Iscrizione** — `/attivita` (o il pulsante *Registra attività* in `/menu`)
+apre una procedura guidata che chiede nome, tipologia (*Organizzazione*,
+*Associazione*, *Attività Privata*, scelta con i pulsanti), descrizione e un
+contatto facoltativo, e si chiude con un riepilogo da confermare. È riservata
+ai **cittadini già iscritti all'anagrafe**: a chi non lo è il bot risponde
+rimandandolo a `/richiedi`. Ogni cittadino può iscrivere più attività, ma non
+due attive con lo stesso nome.
+
+**2. Pubblicazione** — alla conferma l'attività è subito attiva e la sua scheda
+viene pubblicata sulla **Gazzetta Ciompista** (il canale di
+`GAZZETTA_CHANNEL_ID`). Se il canale non è configurato o non è raggiungibile
+l'attività viene iscritta comunque, e il bot lo dice: il Registro vive nel
+database, la Gazzetta ne è una vista.
+
+**3. Consultazione** — `/elenco_attivita` elenca le attività attive. Come
+`/elenco`, non genera menzioni: gli username in elenco non notificano nessuno.
+Nella scheda pubblicata in Gazzetta, invece, il contatto è un tag vero.
+
+**4. Moderazione** — appena un'attività è iscritta, ogni amministratore
+(il Ministero dell'Interno) riceve in privato la sua scheda con due pulsanti:
+
+- **❌ Rifiuta** — la voce è illegittima o legata a un profilo non riconosciuto;
+- **➖ Elimina** — la voce va rimossa d'ufficio dal Registro.
+
+In entrambi i casi il bot aggiorna la copia della notifica di *tutti* gli
+amministratori, toglie il post dalla Gazzetta, avvisa il proprietario e scrive
+sul canale di log. Il record resta nel database con lo stato `RIFIUTATA` o
+`RIMOSSA`, insieme a chi ha deciso e quando: la moderazione resta agli atti, e
+il nome torna libero. Se due amministratori premono il pulsante nello stesso
+istante vince il primo, e il secondo riceve un avviso.
+
+Il post in Gazzetta viene **cancellato**. Se Telegram non lo consente più (un
+post oltre le 48 ore, il bot rimosso dal canale) viene riscritto segnalando la
+rimozione d'ufficio; se non riesce nemmeno quello, il bot lo dice
+all'amministratore e lo annota nel log — ma la moderazione nel database resta
+valida in ogni caso.
+
+---
+
 ## Log su canale
 
 Se imposti `LOG_CHANNEL_ID`, il bot scrive sul canale un messaggio per ogni:
@@ -201,6 +261,7 @@ Se imposti `LOG_CHANNEL_ID`, il bot scrive sul canale un messaggio per ogni:
 - nuova richiesta di cittadinanza, e ogni accettazione / rifiuto / annullamento;
 - inserimento o rimozione di un cittadino;
 - import CSV andato a buon fine;
+- iscrizione, rifiuto o eliminazione di un'attività del Registro Pubblico;
 - promozione o revoca di un amministratore;
 - aggiornamento automatico di uno username (anche quando un tag passa a un altro utente).
 
@@ -216,7 +277,10 @@ Tre inciampi che non dipendono dal bot ma dalla piattaforma:
 1. **Un amministratore riceve le notifiche delle richieste solo se ha già
    avviato una chat privata col bot.** Se non l'ha mai fatto, deve premere
    `/start` in privato. Il bot avvisa quando non riesce a raggiungere qualcuno.
-2. **Per scrivere sul canale di log, il bot deve esserne amministratore.**
+2. **Per scrivere sul canale di log, il bot deve esserne amministratore.** Lo
+   stesso vale per la Gazzetta Ciompista, dove gli serve anche il permesso di
+   **eliminare i propri messaggi**, altrimenti i post delle attività rimosse
+   possono solo essere riscritti.
 3. **Per aggiornare gli username anche dai messaggi di gruppo, la *privacy
    mode* va disattivata** da @BotFather (*Bot Settings → Group Privacy → Turn
    off*). Con la privacy mode attiva il bot non vede i messaggi di gruppo che
@@ -259,6 +323,9 @@ anagrafe/
     ├── comandi.py     i comandi testuali
     ├── menu.py        la pulsantiera e il wizard
     ├── richieste.py   accettazione e rifiuto delle richieste
+    ├── attivita.py    Registro delle Attività: iscrizione e moderazione
+    ├── gazzetta.py    pubblicazione delle schede sul canale pubblico
+    ├── notifiche.py   notifiche agli admin e aggiornamento delle copie
     ├── importazione.py ricezione del file CSV
     └── misc.py        tag automatici e catch-all
 tests/                 test della logica (niente Telegram)
@@ -267,7 +334,11 @@ tests/                 test della logica (niente Telegram)
 Il punto da cui partire per modificare il bot è `anagrafe/commands.py`:
 aggiungendo una voce a `COMMANDS`, il comando compare da solo in `/help`, nella
 pulsantiera `/menu` e — se pubblico — nel menu nativo di Telegram. Resta da
-scrivere la sua azione in `handlers/azioni.py` e registrarla in `AZIONI`.
+scrivere la sua azione e registrarla nel dizionario `AZIONI` di
+`handlers/azioni.py`. Un campo con `opzioni=(...)` diventa una fila di pulsanti
+nel wizard; un comando con `wizard_diretto=True` entra nel proprio wizard
+appena digitato e va negli `entry_points` di `build_menu_handler()`, **non** nel
+dizionario `COMANDI`.
 
 ### Schema del database
 
@@ -278,3 +349,20 @@ scrivere la sua azione in `handlers/azioni.py` e registrarla in `AZIONI`.
 `cognome`, `data_richiesta`, `stato` (`in_attesa` / `accettata` / `rifiutata`),
 `admin_id`, `admin_username`, `data_gestione`, `notifiche` (JSON dei messaggi
 di notifica inviati agli amministratori, per poterli aggiornare tutti).
+
+**`attivita`** — `attivita_id` (PK), `owner_id` (ID Telegram del proprietario),
+`owner_username`, `nome_attivita`, `tipologia`, `descrizione`, `contatto_link`,
+`stato` (`ATTIVA` / `RIMOSSA` / `RIFIUTATA`), `chat_id_pubblico` e
+`message_id_pubblico` (il post in Gazzetta, per poterlo togliere),
+`created_at`, `admin_id`, `admin_username`, `data_moderazione`, `notifiche`.
+
+`owner_id` **non** è dichiarato come foreign key verso `cittadini(telegram_id)`,
+e non è una dimenticanza: quella colonna non è la primary key e il suo indice
+unico può mancare sui registri che contengono ID Telegram duplicati. Con
+`PRAGMA foreign_keys = ON` una foreign key verso una colonna non unica farebbe
+fallire ogni inserimento, e senza `ON DELETE` impedirebbe di rimuovere un
+cittadino che ha delle attività. Il requisito di cittadinanza è applicato in
+`controlli.precondizione_attivita`, come già accade per `richieste`.
+
+Le tabelle vengono create al primo avvio con `CREATE TABLE IF NOT EXISTS`: un
+`registro.db` già esistente acquisisce `attivita` da sé, senza migrazioni.

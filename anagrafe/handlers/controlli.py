@@ -66,8 +66,31 @@ async def _verifica_rimuovi_admin(
     return Riferimento(RIF_TELEGRAM_ID, telegram_id)
 
 
+async def _pre_attivita(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    with db(context) as conn:
+        controlli.precondizione_attivita(conn, update.effective_user.id)
+
+
+async def _verifica_nome_attivita(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, nome: str
+) -> str:
+    with db(context) as conn:
+        return controlli.verifica_nome_attivita_libero(
+            conn, update.effective_user.id, nome
+        )
+
+
+async def _verifica_attivita_moderabile(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, attivita_id: int
+) -> int:
+    with db(context) as conn:
+        controlli.verifica_attivita_moderabile(conn, attivita_id)
+    return attivita_id
+
+
 PRECONDIZIONI: dict[str, Precondizione] = {
     "richiedi": _pre_richiedi,
+    "attivita": _pre_attivita,
 }
 
 VERIFICHE_CAMPO: dict[tuple[str, str], Verifica] = {
@@ -75,4 +98,6 @@ VERIFICHE_CAMPO: dict[tuple[str, str], Verifica] = {
     ("rimuovi", "cittadino"): _verifica_rimuovi,
     ("aggiungi_admin", "utente"): _verifica_aggiungi_admin,
     ("rimuovi_admin", "utente"): _verifica_rimuovi_admin,
+    ("attivita", "nome_attivita"): _verifica_nome_attivita,
+    ("modera_attivita", "attivita"): _verifica_attivita_moderabile,
 }

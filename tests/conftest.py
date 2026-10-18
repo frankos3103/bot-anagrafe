@@ -52,3 +52,19 @@ def cittadino(conn):
     from anagrafe import repository
 
     return repository.insert_citizen(conn, 12345, "@mariorossi", "Mario", "Rossi")
+
+
+@pytest.fixture
+def attivita(conn, cittadino):
+    """Iscrive un'attività di prova del `cittadino` e ne restituisce l'ID."""
+    from anagrafe import repository
+
+    return repository.create_attivita(
+        conn,
+        owner_id=12345,
+        owner_username="mariorossi",
+        nome_attivita="Pizzeria Da Mario",
+        tipologia="privata",
+        descrizione="Pizza al taglio, forno a legna.",
+        contatto_link="@pizzeriadamario",
+    )

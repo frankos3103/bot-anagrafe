@@ -5,16 +5,25 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 
-from .validators import normalizza_username
+from .validators import normalizza_testo, normalizza_username
 
 STATO_IN_ATTESA = "in_attesa"
 STATO_ACCETTATA = "accettata"
 STATO_RIFIUTATA = "rifiutata"
+
+ATTIVITA_ATTIVA = "ATTIVA"
+ATTIVITA_RIMOSSA = "RIMOSSA"
+ATTIVITA_RIFIUTATA = "RIFIUTATA"
+
+ETICHETTE_STATO_ATTIVITA = {
+    ATTIVITA_ATTIVA: "attiva",
+    ATTIVITA_RIMOSSA: "rimossa",
+    ATTIVITA_RIFIUTATA: "rifiutata",
+}
 
 
 class CittadinoGiaEsistente(Exception):
@@ -75,14 +84,6 @@ def get_citizens_by_username(conn: sqlite3.Connection, username: str) -> list[sq
 
 SOGLIA_SOMIGLIANZA = 0.75
 LUNGHEZZA_MIN_FUZZY = 3
-
-
-def normalizza_testo(valore: object) -> str:
-    """Minuscolo e senza accenti: «Nicolò» e «nicolo» diventano uguali."""
-    if valore is None:
-        return ""
-    scomposto = unicodedata.normalize("NFKD", str(valore))
-    return "".join(c for c in scomposto if not unicodedata.combining(c)).casefold()
 
 
 def _token(query: str) -> list[str]:
@@ -332,7 +333,7 @@ def set_request_notifications(
     conn.commit()
 
 
-def load_request_notifications(notifiche_json: str | None) -> list[tuple[int, int]]:
+def load_notifiche(notifiche_json: str | None) -> list[tuple[int, int]]:
     """Rilegge il JSON delle notifiche, tollerando valori corrotti o assenti."""
     if not notifiche_json:
         return []
@@ -348,6 +349,10 @@ def load_request_notifications(notifiche_json: str | None) -> list[tuple[int, in
         except (TypeError, ValueError):
             continue
     return coppie
+
+
+# Nome storico, usato dalle richieste di cittadinanza.
+load_request_notifications = load_notifiche
 
 
 def resolve_request(
@@ -366,3 +371,163 @@ def resolve_request(
         (stato, admin_id, normalizza_username(admin_username), oggi(), request_id),
     )
     conn.commit()
+
+
+# ----------------------------------------------------------------------
+# Registro delle attività
+# ----------------------------------------------------------------------
+
+def create_attivita(
+    conn: sqlite3.Connection,
+    owner_id: int,
+    owner_username: str | None,
+    nome_attivita: str,
+    tipologia: str,
+    descrizione: str,
+    contatto_link: str | None = None,
+    created_at: str | None = None,
+) -> int:
+    """Iscrive un'attività al registro come ATTIVA e ne restituisce l'ID.
+
+    Può alzare sqlite3.IntegrityError se lo stesso proprietario ha già
+    un'attività attiva con quel nome: è l'indice unico parziale creato in
+    init_db, l'ultima barriera sotto a controlli.verifica_nome_attivita_libero.
+    """
+    cursore = conn.execute(
+        """
+        INSERT INTO attivita (
+            owner_id, owner_username, nome_attivita, tipologia, descrizione,
+            contatto_link, stato, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            owner_id,
+            normalizza_username(owner_username),
+            nome_attivita,
+            tipologia,
+            descrizione,
+            contatto_link,
+            ATTIVITA_ATTIVA,
+            created_at or oggi(),
+        ),
+    )
+    conn.commit()
+    return cursore.lastrowid
+
+
+def get_attivita(conn: sqlite3.Connection, attivita_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM attivita WHERE attivita_id = ?", (attivita_id,)
+    ).fetchone()
+
+
+def list_attivita_attive(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Le attività ATTIVE in ordine alfabetico, ignorando maiuscole e accenti.
+
+    L'ordinamento si fa in Python per la stessa ragione di list_citizens: il
+    COLLATE NOCASE di SQLite vale solo per l'ASCII.
+    """
+    righe = conn.execute(
+        "SELECT * FROM attivita WHERE stato = ? ORDER BY attivita_id ASC",
+        (ATTIVITA_ATTIVA,),
+    ).fetchall()
+    righe.sort(key=lambda r: normalizza_testo(r["nome_attivita"]))
+    return righe
+
+
+def list_attivita_per_owner(
+    conn: sqlite3.Connection, owner_id: int, solo_attive: bool = True
+) -> list[sqlite3.Row]:
+    if solo_attive:
+        return conn.execute(
+            "SELECT * FROM attivita WHERE owner_id = ? AND stato = ? "
+            "ORDER BY attivita_id ASC",
+            (owner_id, ATTIVITA_ATTIVA),
+        ).fetchall()
+    return conn.execute(
+        "SELECT * FROM attivita WHERE owner_id = ? ORDER BY attivita_id ASC",
+        (owner_id,),
+    ).fetchall()
+
+
+def count_attivita_attive(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) AS n FROM attivita WHERE stato = ?", (ATTIVITA_ATTIVA,)
+    ).fetchone()["n"]
+
+
+def attivita_per_nome(
+    conn: sqlite3.Connection, owner_id: int, nome_attivita: str
+) -> sqlite3.Row | None:
+    """L'attività ATTIVA di quel proprietario con quel nome.
+
+    Il confronto ignora maiuscole e accenti, così «Pizzeria Da Mario» e
+    «pizzeria da mario» sono lo stesso nome.
+    """
+    cercato = normalizza_testo(nome_attivita)
+    for riga in list_attivita_per_owner(conn, owner_id, solo_attive=True):
+        if normalizza_testo(riga["nome_attivita"]) == cercato:
+            return riga
+    return None
+
+
+def set_attivita_post(
+    conn: sqlite3.Connection,
+    attivita_id: int,
+    chat_id: int | str | None,
+    message_id: int | None,
+) -> None:
+    """Memorizza (o azzera) il riferimento al post pubblicato in Gazzetta.
+
+    chat_id si salva come testo perché il canale può essere un @nomecanale.
+    """
+    conn.execute(
+        "UPDATE attivita SET chat_id_pubblico = ?, message_id_pubblico = ? "
+        "WHERE attivita_id = ?",
+        (None if chat_id is None else str(chat_id), message_id, attivita_id),
+    )
+    conn.commit()
+
+
+def set_attivita_notifiche(
+    conn: sqlite3.Connection, attivita_id: int, notifiche: list[list[int]]
+) -> None:
+    conn.execute(
+        "UPDATE attivita SET notifiche = ? WHERE attivita_id = ?",
+        (json.dumps(notifiche), attivita_id),
+    )
+    conn.commit()
+
+
+def chiudi_attivita(
+    conn: sqlite3.Connection,
+    attivita_id: int,
+    stato: str,
+    admin_id: int,
+    admin_username: str | None,
+) -> bool:
+    """Porta l'attività a RIMOSSA/RIFIUTATA, ma solo se è ancora ATTIVA.
+
+    Restituisce False se qualcun altro l'aveva già chiusa. È l'UPDATE
+    condizionato a decidere l'esito, non una lettura precedente: così due
+    amministratori che premono il pulsante nello stesso istante non producono
+    due moderazioni.
+    """
+    cursore = conn.execute(
+        """
+        UPDATE attivita
+           SET stato = ?, admin_id = ?, admin_username = ?, data_moderazione = ?
+         WHERE attivita_id = ? AND stato = ?
+        """,
+        (
+            stato,
+            admin_id,
+            normalizza_username(admin_username),
+            oggi(),
+            attivita_id,
+            ATTIVITA_ATTIVA,
+        ),
+    )
+    conn.commit()
+    return cursore.rowcount == 1

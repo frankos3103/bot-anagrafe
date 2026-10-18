@@ -8,10 +8,15 @@ regola non viene riscritta tre volte.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
+from typing import Mapping
 
 LUNGHEZZA_MAX_NOME = 100
 LUNGHEZZA_MAX_USERNAME = 32
+LUNGHEZZA_MAX_NOME_ATTIVITA = 80
+LUNGHEZZA_MAX_DESCRIZIONE = 500
+LUNGHEZZA_MAX_CONTATTO = 200
 
 # Telegram ammette solo lettere, cifre e underscore negli username.
 USERNAME_VALIDO = re.compile(r"^[A-Za-z0-9_]+$")
@@ -19,6 +24,14 @@ USERNAME_VALIDO = re.compile(r"^[A-Za-z0-9_]+$")
 
 class ErroreValidazione(ValueError):
     """Un valore fornito dall'utente non è accettabile. Il messaggio è mostrabile."""
+
+
+def normalizza_testo(valore: object) -> str:
+    """Minuscolo e senza accenti: «Nicolò» e «nicolo» diventano uguali."""
+    if valore is None:
+        return ""
+    scomposto = unicodedata.normalize("NFKD", str(valore))
+    return "".join(c for c in scomposto if not unicodedata.combining(c)).casefold()
 
 
 def normalizza_username(valore: str | None) -> str | None:
@@ -93,6 +106,105 @@ def valida_ricerca(valore: str) -> str:
 def valida_username_opzionale(valore: str) -> str | None:
     """Versione per il wizard: accetta anche il vuoto, che significa «nessuno»."""
     return normalizza_username(valore)
+
+
+def _confronto(valore: object) -> str:
+    """Forma canonica per confrontare una scelta: senza accenti, senza emoji.
+
+    Serve a far coincidere «💼 Attività Privata», «attivita privata» e la chiave
+    «privata», così premere il pulsante e scrivere la risposta a mano portano
+    allo stesso valore salvato nel registro.
+    """
+    pulito = "".join(
+        c if (c.isalnum() or c.isspace()) else " " for c in normalizza_testo(valore)
+    )
+    return " ".join(pulito.split())
+
+
+def valida_scelta(
+    valore: str, ammessi: Mapping[str, str], etichetta: str = "Il valore"
+) -> str:
+    """Accetta la chiave canonica o l'etichetta del pulsante; restituisce la chiave.
+
+    `ammessi` è {chiave: etichetta}: la chiave è quella che finisce nel database
+    (stabile nel tempo), l'etichetta quella che l'utente legge. In errore elenca
+    le scelte ammesse, perché è il messaggio che vede chi scrive invece di
+    premere il pulsante.
+    """
+    scelte = ", ".join(ammessi.values())
+    cercato = _confronto(valore)
+    if not cercato:
+        raise ErroreValidazione(f"{etichetta} non può essere vuoto. Scegli fra: {scelte}.")
+    for chiave, nome in ammessi.items():
+        if cercato in (_confronto(chiave), _confronto(nome)):
+            return chiave
+    raise ErroreValidazione(
+        f"«{str(valore).strip()}» non è una scelta valida. Scegli fra: {scelte}."
+    )
+
+
+def valida_nome_attivita(valore: str) -> str:
+    """Il nome di un'attività: una riga sola, perché finisce in un titolo."""
+    pulito = " ".join(str(valore).split())
+    if not pulito:
+        raise ErroreValidazione("Il nome dell'attività non può essere vuoto.")
+    if len(pulito) > LUNGHEZZA_MAX_NOME_ATTIVITA:
+        raise ErroreValidazione(
+            "Il nome dell'attività è troppo lungo (massimo "
+            f"{LUNGHEZZA_MAX_NOME_ATTIVITA} caratteri)."
+        )
+    return pulito
+
+
+def valida_descrizione(valore: str) -> str:
+    """Testo libero: si conservano i capoversi, non gli spazi inutili."""
+    righe = [" ".join(riga.split()) for riga in str(valore).splitlines()]
+    pulito = "\n".join(righe).strip()
+    if not pulito:
+        raise ErroreValidazione("La descrizione non può essere vuota.")
+    if len(pulito) > LUNGHEZZA_MAX_DESCRIZIONE:
+        raise ErroreValidazione(
+            f"La descrizione è troppo lunga (massimo {LUNGHEZZA_MAX_DESCRIZIONE} "
+            f"caratteri, ne ho letti {len(pulito)})."
+        )
+    return pulito
+
+
+def valida_contatto(valore: str) -> str | None:
+    """Un contatto o un link di riferimento. Vuoto (o «-») significa «nessuno».
+
+    Non si impone la forma di una URL: vanno bene un @username, un link t.me, un
+    sito o un numero di telefono. Si vieta l'andare a capo, che spezzerebbe la
+    riga del contatto nella scheda pubblicata in Gazzetta.
+    """
+    pulito = str(valore).strip()
+    if not pulito or pulito == "-":
+        return None
+    if "\n" in pulito or "\r" in pulito:
+        raise ErroreValidazione(
+            "Il contatto deve stare su una riga sola: togli le interruzioni di riga."
+        )
+    if len(pulito) > LUNGHEZZA_MAX_CONTATTO:
+        raise ErroreValidazione(
+            f"Il contatto è troppo lungo (massimo {LUNGHEZZA_MAX_CONTATTO} caratteri)."
+        )
+    return pulito
+
+
+def valida_attivita_id(valore: str | int) -> int:
+    """Un ID attività è un intero positivo (accetta anche la forma #7)."""
+    testo = str(valore).strip().lstrip("#").strip()
+    if not testo:
+        raise ErroreValidazione("L'ID dell'attività non può essere vuoto.")
+    try:
+        numero = int(testo)
+    except ValueError:
+        raise ErroreValidazione(
+            f"L'ID dell'attività deve essere un numero intero, trovato «{testo}»."
+        ) from None
+    if numero <= 0:
+        raise ErroreValidazione("L'ID dell'attività deve essere un numero positivo.")
+    return numero
 
 
 # Un cittadino si può indicare per ID cittadino (#12), per tag (@mario) o,

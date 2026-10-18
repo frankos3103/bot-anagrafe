@@ -5,10 +5,16 @@ import pytest
 from anagrafe.formatting import (
     LIMITE_MESSAGGIO,
     SPAZIO_LARGHEZZA_ZERO,
+    contatto_visibile,
+    escape_markdown_legacy,
     escape_markdown_v2,
     escape_tabella,
     format_row,
+    post_gazzetta,
+    post_gazzetta_rimosso,
+    riga_attivita,
     riga_elenco,
+    scheda_moderazione,
     spezza_in_blocchi,
     tabella_markdown,
     username_o_placeholder,
@@ -150,3 +156,144 @@ def test_tabella_markdown():
 
 def test_tabella_markdown_sfugge_le_pipe():
     assert r"Mario\|Luigi" in tabella_markdown([riga(nome="Mario|Luigi")], 1)
+
+
+# ----------------------------------------------------------------------
+# Registro delle attività
+# ----------------------------------------------------------------------
+
+def attivita(**modifiche):
+    riga = {
+        "attivita_id": 7,
+        "owner_id": 12345,
+        "owner_username": "mariorossi",
+        "nome_attivita": "Pizzeria Da Mario",
+        "tipologia": "privata",
+        "descrizione": "Pizza al taglio, forno a legna.",
+        "contatto_link": "@pizzeriadamario",
+        "stato": "ATTIVA",
+        "created_at": "2026-10-18",
+        "admin_id": None,
+        "admin_username": None,
+        "data_moderazione": None,
+    }
+    riga.update(modifiche)
+    return riga
+
+
+# Un nome che prova a iniettare un link nel post pubblico.
+OSTILE = "Bar [clicca](http://spam.it)"
+
+
+def test_il_post_sfugge_liniezione_di_link():
+    testo = post_gazzetta(attivita(nome_attivita=OSTILE))
+    # Nessuna parentesi quadra chiusa seguita da tonda aperta non sfuggita:
+    # sarebbe un link cliccabile scritto dall'utente.
+    assert "](" not in testo.replace("\\](", "")
+
+
+@pytest.mark.parametrize("carattere", list("_*[]().!-"))
+def test_il_post_sfugge_ogni_metacarattere_dellutente(carattere):
+    """I marcatori del grassetto sono voluti; i caratteri dell'utente no.
+
+    Si verifica quindi che il carattere scritto dall'utente compaia nella forma
+    sfuggita, non che il messaggio sia privo di marcatori.
+    """
+    testo = post_gazzetta(attivita(descrizione=f"Prezzi {carattere} ottimi"))
+    assert "\\" + carattere in testo
+
+
+def test_il_post_senza_contatto_non_mostra_la_riga():
+    assert "📞" not in post_gazzetta(attivita(contatto_link=None))
+    assert "📞" in post_gazzetta(attivita())
+
+
+def test_il_post_cita_lid_e_la_data():
+    testo = post_gazzetta(attivita())
+    assert "7" in testo and "2026" in testo
+
+
+def test_un_post_al_massimo_della_descrizione_sta_nel_limite():
+    testo = post_gazzetta(attivita(descrizione="x" * 500))
+    assert len(testo) < LIMITE_MESSAGGIO
+
+
+def test_la_pietra_tombale_cita_il_nome_e_il_decreto():
+    testo = post_gazzetta_rimosso(attivita())
+    assert "Pizzeria Da Mario" in testo
+    assert "13/10/2026" in testo
+
+
+def test_la_riga_dellelenco_non_tagga_nessuno():
+    """Come /elenco: un elenco non deve notificare cinquanta persone."""
+    assert SPAZIO_LARGHEZZA_ZERO in riga_attivita(attivita())
+
+
+def test_la_riga_dellelenco_senza_contatto():
+    testo = riga_attivita(attivita(contatto_link=None))
+    assert "nessun contatto" in testo
+
+
+def test_la_riga_dellelenco_mostra_letichetta_della_tipologia():
+    assert "Attività Privata" in riga_attivita(attivita())
+
+
+def test_nella_gazzetta_il_tag_e_un_tag_vero():
+    """Nel post pubblico la menzione è il punto, non un effetto collaterale."""
+    assert SPAZIO_LARGHEZZA_ZERO not in post_gazzetta(attivita())
+
+
+def test_la_scheda_admin_non_ha_bisogno_di_escape():
+    """Va inviata senza parse_mode: il testo dell'utente resta tale e quale."""
+    testo = scheda_moderazione(attivita(nome_attivita=OSTILE), {"username": "mariorossi", "citizen_id": 3})
+    assert OSTILE in testo
+    assert "cittadino #3" in testo
+
+
+def test_la_scheda_admin_segnala_il_proprietario_sparito():
+    testo = scheda_moderazione(attivita(), None)
+    assert "non risulta iscritto" in testo
+
+
+def test_la_scheda_admin_di_unattivita_moderata():
+    testo = scheda_moderazione(
+        attivita(stato="RIMOSSA", data_moderazione="2026-10-19",
+                 admin_id=100, admin_username="capo"),
+        None,
+    )
+    assert "RIMOSSA" in testo
+    assert "2026-10-19" in testo
+    assert "Ministero dell'Interno" not in testo  # niente invito a moderare
+
+
+def test_la_scheda_admin_attiva_invita_a_moderare():
+    testo = scheda_moderazione(attivita(), None)
+    assert "Ministero dell'Interno" in testo
+
+
+@pytest.mark.parametrize(
+    "contatto,atteso",
+    [
+        (None, "(nessun contatto)"),
+        ("", "(nessun contatto)"),
+        ("https://t.me/x", "https://t.me/x"),
+    ],
+)
+def test_contatto_visibile(contatto, atteso):
+    assert contatto_visibile(contatto) == atteso
+
+
+def test_un_elenco_lungo_resta_impaginato():
+    blocchi = spezza_in_blocchi([riga_attivita(attivita())] * 300, "intestazione")
+    assert len(blocchi) > 1
+    assert all(len(b) <= LIMITE_MESSAGGIO for b in blocchi)
+
+
+@pytest.mark.parametrize("carattere", list("_*`["))
+def test_lescape_legacy_copre_i_caratteri_di_send_log(carattere):
+    """send_log usa il Markdown «legacy» e non solleva: un log perso è invisibile."""
+    assert escape_markdown_legacy(f"Bar{carattere}Mario") == f"Bar\\{carattere}Mario"
+
+
+def test_lescape_legacy_di_none():
+    assert escape_markdown_legacy(None) == ""

@@ -53,6 +53,12 @@ async def rispondi(update: Update, testo: str, **kwargs) -> None:
         await messaggio.reply_text(testo, **kwargs)
 
 
+def argomenti(update: Update) -> str:
+    """Il testo che segue il comando, senza il comando stesso."""
+    testo = (update.effective_message.text or "").strip()
+    return testo.partition(" ")[2].strip()
+
+
 def richiede(ruolo_minimo: Role):
     """Decoratore: blocca l'handler se l'utente non ha il ruolo richiesto."""
 

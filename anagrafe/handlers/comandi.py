@@ -26,14 +26,8 @@ from .azioni import (
     azione_rimuovi_admin,
     azione_tagall,
 )
-from .common import rispondi, ruolo_utente
+from .common import argomenti, rispondi, ruolo_utente
 from .controlli import PRECONDIZIONI
-
-
-def _argomenti(update: Update) -> str:
-    """Il testo che segue il comando, senza il comando stesso."""
-    testo = (update.effective_message.text or "").strip()
-    return testo.partition(" ")[2].strip()
 
 
 async def _errore_uso(update: Update, nome_comando: str, exc: ErroreValidazione) -> None:
@@ -70,7 +64,7 @@ async def cmd_esporta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def cmd_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        query = valida_ricerca(_argomenti(update))
+        query = valida_ricerca(argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "cerca", exc)
         return
@@ -87,7 +81,7 @@ async def cmd_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     try:
-        dati = parse_richiedi(_argomenti(update))
+        dati = parse_richiedi(argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "richiedi", exc)
         return
@@ -100,7 +94,7 @@ async def cmd_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        dati = parse_inserisci(_argomenti(update))
+        dati = parse_inserisci(argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "inserisci", exc)
         return
@@ -118,7 +112,7 @@ async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        cittadino = valida_riferimento_cittadino(_argomenti(update))
+        cittadino = valida_riferimento_cittadino(argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "rimuovi", exc)
         return
@@ -139,7 +133,7 @@ async def cmd_elenco_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def cmd_aggiungi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        utente = valida_riferimento_utente(_argomenti(update))
+        utente = valida_riferimento_utente(argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "aggiungi_admin", exc)
         return
@@ -148,7 +142,7 @@ async def cmd_aggiungi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def cmd_rimuovi_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        utente = valida_riferimento_utente(_argomenti(update))
+        utente = valida_riferimento_utente(argomenti(update))
     except ErroreValidazione as exc:
         await _errore_uso(update, "rimuovi_admin", exc)
         return

@@ -59,6 +59,8 @@ def main() -> int:
     logger.info("Amministratori: %s", settings.admins_path)
     if settings.log_channel_id:
         logger.info("Canale di log: %s", settings.log_channel_id)
+    if settings.gazzetta_channel_id:
+        logger.info("Gazzetta Ciompista: %s", settings.gazzetta_channel_id)
 
     application = build_application(settings)
     logger.info("Bot avviato, in ascolto...")

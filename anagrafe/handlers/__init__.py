@@ -24,6 +24,7 @@ from telegram.ext import (
 )
 
 from . import comandi
+from .attivita import cmd_elenco_attivita, cmd_modera_attivita, on_attivita_callback
 from .importazione import cmd_importa, on_documento
 from .menu import build_menu_handler
 from .misc import aggiorna_tag, catch_all, on_error
@@ -43,6 +44,12 @@ COMANDI = {
     "aggiungi_admin": comandi.cmd_aggiungi_admin,
     "rimuovi_admin": comandi.cmd_rimuovi_admin,
     "elenco_admin": comandi.cmd_elenco_admin,
+    "elenco_attivita": cmd_elenco_attivita,
+    "modera_attivita": cmd_modera_attivita,
+    # «attivita» NON va qui: ha wizard_diretto=True, quindi sta negli
+    # entry_points di build_menu_handler(). La ConversationHandler è
+    # registrata prima dei CommandHandler, perciò un CommandHandler omonimo
+    # verrebbe registrato ma mai raggiunto.
 }
 
 
@@ -57,9 +64,14 @@ def registra_handlers(application: Application) -> None:
     for nome, funzione in COMANDI.items():
         application.add_handler(CommandHandler(nome, funzione))
 
-    # 3. I pulsanti delle richieste di cittadinanza.
+    # 3. I pulsanti delle richieste di cittadinanza e della moderazione delle
+    #    attività. I pattern sono disgiunti fra loro e da quelli della
+    #    pulsantiera (tutti prefissati «menu:»), quindi l'ordine è indifferente.
     application.add_handler(
         CallbackQueryHandler(on_richiesta_callback, pattern=r"^richiesta:")
+    )
+    application.add_handler(
+        CallbackQueryHandler(on_attivita_callback, pattern=r"^attivita:")
     )
 
     # 4. Gli allegati (import CSV). Solo messaggi di utenti: un MessageHandler

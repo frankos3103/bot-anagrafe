@@ -11,13 +11,37 @@ from typing import Any, Callable
 
 from .roles import Role
 from .validators import (
+    valida_attivita_id,
+    valida_contatto,
+    valida_descrizione,
     valida_nome,
+    valida_nome_attivita,
     valida_ricerca,
+    valida_scelta,
     valida_riferimento_cittadino,
     valida_riferimento_utente,
     valida_telegram_id,
     valida_username_opzionale,
 )
+
+
+@dataclass(frozen=True)
+class Opzione:
+    """Una scelta a pulsante per un campo del wizard.
+
+    `chiave` è il valore canonico che finisce nel database: è stabile nel tempo,
+    così cambiare l'etichetta non invalida i dati già scritti. `etichetta` è il
+    nome pubblico, quello che compare anche nelle schede della Gazzetta.
+    """
+
+    chiave: str
+    etichetta: str
+    emoji: str = ""
+
+    @property
+    def label(self) -> str:
+        """Testo del pulsante."""
+        return f"{self.emoji} {self.etichetta}".strip()
 
 
 @dataclass(frozen=True)
@@ -29,6 +53,19 @@ class Campo:
     prompt: str
     validatore: Callable[[str], Any]
     opzionale: bool = False
+    opzioni: tuple[Opzione, ...] = ()
+    per_riga: int = 1
+
+    @property
+    def a_pulsanti(self) -> bool:
+        return bool(self.opzioni)
+
+    def mostra(self, valore: Any) -> str:
+        """Il valore come va mostrato nel riepilogo: l'etichetta, non la chiave."""
+        for opzione in self.opzioni:
+            if opzione.chiave == valore:
+                return opzione.label
+        return "(nessuno)" if valore in (None, "") else str(valore)
 
 
 @dataclass(frozen=True)
@@ -44,6 +81,10 @@ class Comando:
     nel_menu: bool = True
     nell_help: bool = True
     nel_menu_telegram: bool = False
+    # Il comando entra subito nel proprio wizard, senza passare dalla
+    # pulsantiera: va negli entry_points della ConversationHandler, non in
+    # handlers.COMANDI. Vedi build_menu_handler().
+    wizard_diretto: bool = False
 
     @property
     def label(self) -> str:
@@ -53,6 +94,26 @@ class Comando:
     @property
     def richiede_input(self) -> bool:
         return bool(self.campi)
+
+
+# Le tipologie previste dal Decreto Ministeriale n.3 del 13/10/2026. Unica
+# fonte di verità: da qui nascono i pulsanti del wizard, il validatore del campo
+# e le etichette delle schede pubblicate in Gazzetta.
+TIPOLOGIE_ATTIVITA: tuple[Opzione, ...] = (
+    Opzione("organizzazione", "Organizzazione", "🏢"),
+    Opzione("associazione", "Associazione", "🤝"),
+    Opzione("privata", "Attività Privata", "💼"),
+)
+
+ETICHETTE_TIPOLOGIA: dict[str, str] = {
+    o.chiave: o.etichetta for o in TIPOLOGIE_ATTIVITA
+}
+EMOJI_TIPOLOGIA: dict[str, str] = {o.chiave: o.emoji for o in TIPOLOGIE_ATTIVITA}
+
+
+def etichetta_tipologia(chiave: str) -> str:
+    """Il nome pubblico di una tipologia; la chiave grezza se è sconosciuta."""
+    return ETICHETTE_TIPOLOGIA.get(chiave, str(chiave))
 
 
 _CAMPO_NOME = Campo(
@@ -139,6 +200,54 @@ COMMANDS: tuple[Comando, ...] = (
         nel_menu_telegram=True,
     ),
     Comando(
+        nome="attivita",
+        ruolo=Role.PUBBLICO,
+        emoji="🏪",
+        descrizione="Iscrive una tua attività al Registro Pubblico delle Attività",
+        uso="/attivita",
+        etichetta_menu="Registra attività",
+        campi=(
+            Campo(
+                "nome_attivita",
+                "Nome",
+                "Come si chiama l'attività?",
+                valida_nome_attivita,
+            ),
+            Campo(
+                "tipologia",
+                "Tipologia",
+                "Di che tipo di attività si tratta?",
+                lambda v: valida_scelta(v, ETICHETTE_TIPOLOGIA, "La tipologia"),
+                opzioni=TIPOLOGIE_ATTIVITA,
+            ),
+            Campo(
+                "descrizione",
+                "Descrizione",
+                "Descrivi l'attività in poche righe (massimo 500 caratteri).",
+                valida_descrizione,
+            ),
+            Campo(
+                "contatto_link",
+                "Contatto",
+                "Lascia un contatto o un link di riferimento "
+                "(@username, https://..., un numero).",
+                valida_contatto,
+                opzionale=True,
+            ),
+        ),
+        nel_menu_telegram=True,
+        wizard_diretto=True,
+    ),
+    Comando(
+        nome="elenco_attivita",
+        ruolo=Role.PUBBLICO,
+        emoji="📋",
+        descrizione="Elenco delle attività iscritte al Registro Pubblico",
+        uso="/elenco_attivita",
+        etichetta_menu="Elenco attività",
+        nel_menu_telegram=True,
+    ),
+    Comando(
         nome="inserisci",
         ruolo=Role.ADMIN,
         emoji="➕",
@@ -198,6 +307,23 @@ COMMANDS: tuple[Comando, ...] = (
         uso="/importa (allegando un file .csv)",
         esempio="invia il file .csv con didascalia /importa",
         etichetta_menu="Importa CSV",
+    ),
+    Comando(
+        nome="modera_attivita",
+        ruolo=Role.ADMIN,
+        emoji="🏛",
+        descrizione="Rimanda la scheda di un'attività con i pulsanti di moderazione",
+        uso="/modera_attivita <ID_attività>",
+        esempio="/modera_attivita 7",
+        etichetta_menu="Modera attività",
+        campi=(
+            Campo(
+                "attivita",
+                "Attività",
+                "Quale attività vuoi moderare? (ID numerico, es. 7)",
+                valida_attivita_id,
+            ),
+        ),
     ),
     Comando(
         nome="elenco_admin",

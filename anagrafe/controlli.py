@@ -106,3 +106,70 @@ def verifica_admin_rimovibile(roles: RoleRegistry, telegram_id: int) -> None:
         raise ErroreValidazione(
             f"L'ID Telegram {telegram_id} non risulta nell'elenco degli amministratori."
         )
+
+
+# ----------------------------------------------------------------------
+# Registro delle attività
+# ----------------------------------------------------------------------
+
+def precondizione_attivita(conn: sqlite3.Connection, telegram_id: int) -> sqlite3.Row:
+    """Il Registro delle Attività è riservato ai cittadini già iscritti.
+
+    È il requisito di cittadinanza del Decreto Ministeriale n.3 del 13/10/2026,
+    ed è anche il motivo per cui attivita.owner_id non ha una FOREIGN KEY
+    (vedi il commento allo schema in db.py). Restituisce la riga del cittadino,
+    che serve poi per la scheda pubblica e per la notifica al Ministero.
+    """
+    cittadino = repository.get_citizen_by_telegram_id(conn, telegram_id)
+    if cittadino is None:
+        raise ErroreValidazione(
+            "Il Registro Pubblico delle Attività è riservato ai cittadini "
+            "della Repubblica. Non risulti iscritto all'anagrafe: invia prima "
+            "una richiesta di cittadinanza con /richiedi."
+        )
+    return cittadino
+
+
+def verifica_nome_attivita_libero(
+    conn: sqlite3.Connection, owner_id: int, nome_attivita: str
+) -> str:
+    """Restituisce il nome se il proprietario non ne ha già una così chiamata.
+
+    Il vincolo è per proprietario e solo fra le attività attive: due cittadini
+    diversi possono avere attività omonime, e un nome torna libero dopo una
+    rimozione d'ufficio.
+    """
+    esistente = repository.attivita_per_nome(conn, owner_id, nome_attivita)
+    if esistente is not None:
+        raise ErroreValidazione(
+            f"Hai già registrato un'attività con il nome "
+            f"«{esistente['nome_attivita']}» (#{esistente['attivita_id']}). "
+            "Scegli un nome diverso."
+        )
+    return nome_attivita
+
+
+def risolvi_attivita(conn: sqlite3.Connection, attivita_id: int) -> sqlite3.Row:
+    riga = repository.get_attivita(conn, attivita_id)
+    if riga is None:
+        raise ErroreValidazione(f"Nessuna attività con ID #{attivita_id}.")
+    return riga
+
+
+def verifica_attivita_moderabile(
+    conn: sqlite3.Connection, attivita_id: int
+) -> sqlite3.Row:
+    """L'attività esiste e non è ancora stata moderata.
+
+    Serve a dirlo subito all'amministratore; la garanzia vera contro la doppia
+    moderazione è l'UPDATE condizionato di repository.chiudi_attivita.
+    """
+    riga = risolvi_attivita(conn, attivita_id)
+    if riga["stato"] != repository.ATTIVITA_ATTIVA:
+        etichetta = repository.ETICHETTE_STATO_ATTIVITA.get(
+            riga["stato"], riga["stato"]
+        )
+        raise ErroreValidazione(
+            f"L'attività #{attivita_id} è già {etichetta}."
+        )
+    return riga

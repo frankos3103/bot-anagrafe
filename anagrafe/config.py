@@ -26,10 +26,12 @@ class Settings:
     log_channel_id: int | str | None
     db_path: Path
     admins_path: Path
+    # In coda e con un default: Settings è frozen e costruita per posizione.
+    gazzetta_channel_id: int | str | None = None
 
 
-def _canale_log(valore: str | None) -> int | str | None:
-    """Il canale di log può essere un ID numerico (-1001234567890) o un @username."""
+def _canale(valore: str | None) -> int | str | None:
+    """Un canale si indica con un ID numerico (-1001234567890) o con un @username."""
     if not valore:
         return None
     valore = valore.strip()
@@ -77,7 +79,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     return Settings(
         token=token,
         root_admin_id=root_admin_id,
-        log_channel_id=_canale_log(env.get("LOG_CHANNEL_ID")),
+        log_channel_id=_canale(env.get("LOG_CHANNEL_ID")),
+        gazzetta_channel_id=_canale(env.get("GAZZETTA_CHANNEL_ID")),
         db_path=db_path,
         admins_path=admins_path,
     )

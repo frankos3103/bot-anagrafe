@@ -20,10 +20,10 @@ from telegram.ext import (
     filters,
 )
 
-from ..commands import Campo, Comando, comandi_per_ruolo, trova_comando
+from ..commands import COMMANDS, Campo, Comando, comandi_per_ruolo, trova_comando
 from ..validators import ErroreValidazione
 from .azioni import AZIONI
-from .common import rispondi, ruolo_utente
+from .common import argomenti, rispondi, ruolo_utente
 from .controlli import PRECONDIZIONI, VERIFICHE_CAMPO
 from .importazione import ATTESA_CSV, ISTRUZIONI
 
@@ -38,6 +38,8 @@ TESTO_MENU = (
     "Scegli un'azione: quelle che richiedono dei dati te li chiederanno "
     "un passo alla volta."
 )
+
+NEGATO = "⛔ Non sei autorizzato a usare questo comando."
 
 BOTTONE_ANNULLA = InlineKeyboardButton("❌ Annulla", callback_data="menu:annulla")
 BOTTONE_SALTA = InlineKeyboardButton("⏭ Salta", callback_data="menu:salta")
@@ -63,6 +65,10 @@ async def _mostra_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return SCELTA
 
 
+async def _termina(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    return ConversationHandler.END
+
+
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.pop("wizard", None)
     return await _mostra_menu(update, context)
@@ -86,6 +92,30 @@ def _campo_corrente(context: ContextTypes.DEFAULT_TYPE) -> tuple[Comando, Campo]
     return comando, comando.campi[stato["indice"]]
 
 
+def _tastiera_campo(stato: dict, campo: Campo) -> InlineKeyboardMarkup:
+    """I pulsanti delle opzioni, se il campo le offre, più Salta/Annulla.
+
+    Il callback_data porta gli indici e non le etichette: «menu:opt:1:2» sono
+    undici byte, quindi il limite di 64 byte diventa impossibile da superare e
+    nessun carattere scritto dall'utente finisce nel callback_data. Il primo
+    indice è quello del campo, e serve a riconoscere una tastiera vecchia.
+    """
+    righe: list[list[InlineKeyboardButton]] = []
+
+    if campo.a_pulsanti:
+        bottoni = [
+            InlineKeyboardButton(
+                opzione.label, callback_data=f"menu:opt:{stato['indice']}:{i}"
+            )
+            for i, opzione in enumerate(campo.opzioni)
+        ]
+        passo = max(1, campo.per_riga)
+        righe = [bottoni[i : i + passo] for i in range(0, len(bottoni), passo)]
+
+    righe.append([BOTTONE_SALTA, BOTTONE_ANNULLA] if campo.opzionale else [BOTTONE_ANNULLA])
+    return InlineKeyboardMarkup(righe)
+
+
 async def _chiedi_campo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Invia il prompt del campo corrente, o passa al riepilogo se sono finiti."""
     corrente = _campo_corrente(context)
@@ -93,18 +123,16 @@ async def _chiedi_campo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return await _mostra_riepilogo(update, context)
 
     comando, campo = corrente
-    passo = f"Passo {_wizard(context)['indice'] + 1} di {len(comando.campi)}"
+    stato = _wizard(context)
+    passo = f"Passo {stato['indice'] + 1} di {len(comando.campi)}"
     testo = f"{comando.emoji} {comando.nome}\n{passo}\n\n{campo.prompt}"
+    if campo.a_pulsanti:
+        testo += "\n\n(scegli con i pulsanti, oppure scrivi la risposta)"
     if campo.opzionale:
         testo += "\n\n(facoltativo: premi «Salta» per lasciarlo vuoto)"
 
-    bottoni = [BOTTONE_SALTA, BOTTONE_ANNULLA] if campo.opzionale else [BOTTONE_ANNULLA]
-    await rispondi(update, testo, reply_markup=InlineKeyboardMarkup([bottoni]))
+    await rispondi(update, testo, reply_markup=_tastiera_campo(stato, campo))
     return RACCOLTA
-
-
-def _descrizione_valore(valore) -> str:
-    return "(nessuno)" if valore in (None, "") else str(valore)
 
 
 async def _mostra_riepilogo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -113,7 +141,7 @@ async def _mostra_riepilogo(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     righe = [f"{comando.emoji} Conferma «{comando.nome}»", ""]
     for campo in comando.campi:
         righe.append(
-            f"• {campo.etichetta}: {_descrizione_valore(stato['valori'].get(campo.chiave))}"
+            f"• {campo.etichetta}: {campo.mostra(stato['valori'].get(campo.chiave))}"
         )
 
     tastiera = InlineKeyboardMarkup(
@@ -123,8 +151,15 @@ async def _mostra_riepilogo(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return CONFERMA
 
 
-async def on_valore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Riceve la risposta dell'utente a un prompt del wizard."""
+async def _registra_valore(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, grezzo: str
+) -> int:
+    """Valida il valore del campo corrente, lo salva e avanza di un passo.
+
+    È il percorso unico del testo e dei pulsanti: anche una scelta fatta a
+    pulsante passa dal validatore del campo e dalle VERIFICHE_CAMPO, così il
+    valore salvato è sempre nella forma canonica.
+    """
     corrente = _campo_corrente(context)
     if corrente is None:
         return await cmd_menu(update, context)
@@ -132,7 +167,7 @@ async def on_valore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     comando, campo = corrente
     verifica = VERIFICHE_CAMPO.get((comando.nome, campo.chiave))
     try:
-        valore = campo.validatore(update.effective_message.text or "")
+        valore = campo.validatore(grezzo)
         if verifica is not None:
             # Controlla subito sul registro: meglio scoprire ora che l'ID non
             # esiste che dopo aver compilato tutto il resto.
@@ -145,6 +180,38 @@ async def on_valore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     stato["valori"][campo.chiave] = valore
     stato["indice"] += 1
     return await _chiedi_campo(update, context)
+
+
+async def on_valore(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Riceve la risposta scritta dell'utente a un prompt del wizard."""
+    return await _registra_valore(update, context, update.effective_message.text or "")
+
+
+async def on_opzione(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Click su un pulsante-opzione: «menu:opt:<indice_campo>:<indice_opzione>»."""
+    query = update.callback_query
+    corrente = _campo_corrente(context)
+    if corrente is None:
+        await query.answer()
+        return await cmd_menu(update, context)
+
+    _, campo = corrente
+    try:
+        _, _, indice_campo, indice_opzione = query.data.split(":")
+        indice_campo, indice_opzione = int(indice_campo), int(indice_opzione)
+    except ValueError:
+        await query.answer("Scelta non riconosciuta.", show_alert=True)
+        return RACCOLTA
+
+    # Una tastiera vecchia (un passo già superato, o un wizard precedente ancora
+    # in cronologia) non deve poter scrivere nel campo sbagliato.
+    if indice_campo != _wizard(context)["indice"] or indice_opzione >= len(campo.opzioni):
+        await query.answer("Questo pulsante non è più valido.", show_alert=True)
+        return await _chiedi_campo(update, context)
+
+    opzione = campo.opzioni[indice_opzione]
+    await query.answer(opzione.label)
+    return await _registra_valore(update, context, opzione.chiave)
 
 
 async def on_salta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -161,6 +228,82 @@ async def on_salta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 # ----------------------------------------------------------------------
+# Avvio di un comando
+# ----------------------------------------------------------------------
+
+async def avvia_wizard(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    nome_comando: str,
+    mostra_menu_al_termine: bool = False,
+) -> int:
+    """Apre il wizard di un comando saltando la schermata di scelta.
+
+    È il tronco comune fra il click su un pulsante della pulsantiera e un
+    comando messo negli entry_points: controllo del ruolo, precondizione,
+    esecuzione immediata se il comando non chiede dati. `mostra_menu_al_termine`
+    distingue i due casi: dalla pulsantiera si torna alla pulsantiera, da
+    /comando la conversazione finisce.
+    """
+    comando = trova_comando(nome_comando)
+    fine = _mostra_menu if mostra_menu_al_termine else _termina
+
+    if comando is None:
+        await rispondi(update, "⚠️ Comando non riconosciuto.")
+        return await fine(update, context)
+
+    # Il ruolo si ricontrolla qui perché si arriva anche da un comando digitato,
+    # non solo da una tastiera. Si usa la stringa e non MESSAGGIO_NEGATO, che non
+    # ha una voce per Role.PUBBLICO.
+    if ruolo_utente(update, context) < comando.ruolo:
+        await rispondi(update, NEGATO)
+        return await fine(update, context)
+
+    precondizione = PRECONDIZIONI.get(comando.nome)
+    if precondizione is not None:
+        try:
+            await precondizione(update, context)
+        except ErroreValidazione as exc:
+            # L'operazione fallirebbe comunque: inutile chiedere i dati.
+            await rispondi(update, f"⚠️ {exc}")
+            return await fine(update, context)
+
+    if comando.nome == "importa":
+        # L'import ha bisogno di un allegato: usciamo dal wizard e aspettiamo il file.
+        context.user_data[ATTESA_CSV] = True
+        await rispondi(update, ISTRUZIONI)
+        return ConversationHandler.END
+
+    if not comando.richiede_input:
+        await AZIONI[comando.nome](update, context, {})
+        return await fine(update, context)
+
+    context.user_data["wizard"] = {"comando": comando.nome, "valori": {}, "indice": 0}
+    return await _chiedi_campo(update, context)
+
+
+def _entry_wizard(nome: str):
+    """L'handler di /comando per i comandi dichiarati wizard_diretto."""
+
+    async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+        context.user_data.pop("wizard", None)
+        if argomenti(update):
+            # Questi comandi hanno campi a pulsanti e campi di testo libero pieni
+            # di virgole: un parsing degli argomenti sulla stessa riga darebbe due
+            # percorsi da mantenere, e una compilazione parziale confonderebbe più
+            # di quanto aiuti.
+            await rispondi(
+                update,
+                "ℹ️ Questo comando si compila a passi: ti chiedo i dati uno alla "
+                "volta, quindi ho ignorato il testo dopo il comando.",
+            )
+        return await avvia_wizard(update, context, nome)
+
+    handler.__name__ = f"entry_{nome}"
+    return handler
+
+
+# ----------------------------------------------------------------------
 # Router dei pulsanti
 # ----------------------------------------------------------------------
 
@@ -174,33 +317,13 @@ async def on_scelta_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return SCELTA
 
     # I permessi si ricontrollano al click: la tastiera potrebbe essere vecchia.
+    # Qui con un alert, che su un pulsante si vede meglio di una risposta in chat.
     if ruolo_utente(update, context) < comando.ruolo:
-        await query.answer("⛔ Non sei autorizzato a usare questo comando.", show_alert=True)
+        await query.answer(NEGATO, show_alert=True)
         return SCELTA
 
     await query.answer()
-
-    precondizione = PRECONDIZIONI.get(comando.nome)
-    if precondizione is not None:
-        try:
-            await precondizione(update, context)
-        except ErroreValidazione as exc:
-            # L'operazione fallirebbe comunque: inutile chiedere i dati.
-            await rispondi(update, f"⚠️ {exc}")
-            return await _mostra_menu(update, context)
-
-    if comando.nome == "importa":
-        # L'import ha bisogno di un allegato: usciamo dal wizard e aspettiamo il file.
-        context.user_data[ATTESA_CSV] = True
-        await rispondi(update, ISTRUZIONI)
-        return ConversationHandler.END
-
-    if not comando.richiede_input:
-        await AZIONI[comando.nome](update, context, {})
-        return await _mostra_menu(update, context)
-
-    context.user_data["wizard"] = {"comando": comando.nome, "valori": {}, "indice": 0}
-    return await _chiedi_campo(update, context)
+    return await avvia_wizard(update, context, nome, mostra_menu_al_termine=True)
 
 
 async def on_conferma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -213,7 +336,7 @@ async def on_conferma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     comando = trova_comando(stato["comando"])
     if comando is None or ruolo_utente(update, context) < comando.ruolo:
-        await rispondi(update, "⛔ Non sei autorizzato a usare questo comando.")
+        await rispondi(update, NEGATO)
         return await _mostra_menu(update, context)
 
     mancanti = [
@@ -260,11 +383,21 @@ def build_menu_handler() -> ConversationHandler:
         CallbackQueryHandler(on_scelta_comando, pattern=r"^menu:cmd:"),
         CallbackQueryHandler(on_chiudi, pattern=r"^menu:chiudi$"),
     ]
+    # I comandi con wizard_diretto entrano nel proprio wizard senza passare dalla
+    # pulsantiera. Stanno negli entry_points perché la ConversationHandler è
+    # registrata prima dei CommandHandler e vincerebbe comunque, e anche nei
+    # fallbacks: senza, digitarne uno mentre un altro wizard è in corso non
+    # scatterebbe (la conversazione è già attiva) e, essendo un comando, sarebbe
+    # escluso dal MessageHandler e finirebbe nel catch-all.
+    entry_diretti = [
+        CommandHandler(c.nome, _entry_wizard(c.nome)) for c in COMMANDS if c.wizard_diretto
+    ]
     return ConversationHandler(
-        entry_points=[CommandHandler("menu", cmd_menu)] + scelta_handlers,
+        entry_points=[CommandHandler("menu", cmd_menu)] + entry_diretti + scelta_handlers,
         states={
             SCELTA: scelta_handlers,
             RACCOLTA: [
+                CallbackQueryHandler(on_opzione, pattern=r"^menu:opt:\d+:\d+$"),
                 CallbackQueryHandler(on_salta, pattern=r"^menu:salta$"),
                 CallbackQueryHandler(on_annulla, pattern=r"^menu:annulla$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, on_valore),
@@ -281,7 +414,8 @@ def build_menu_handler() -> ConversationHandler:
         fallbacks=[
             CommandHandler("annulla", on_annulla),
             CallbackQueryHandler(on_annulla, pattern=r"^menu:annulla$"),
-        ],
+        ]
+        + entry_diretti,
         conversation_timeout=DURATA_MASSIMA,
         name="menu",
     )

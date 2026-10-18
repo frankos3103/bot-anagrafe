@@ -65,8 +65,36 @@ CREATE TABLE IF NOT EXISTS richieste (
 """
 
 
+# owner_id è l'ID Telegram del proprietario, ma NON è dichiarato FOREIGN KEY
+# verso cittadini(telegram_id): quella colonna non è la primary key e il suo
+# indice unico può mancare sui registri preesistenti con ID duplicati (vedi
+# init_db). Con PRAGMA foreign_keys = ON una FK verso una colonna non unica fa
+# fallire ogni INSERT con «foreign key mismatch», e senza ON DELETE bloccherebbe
+# /rimuovi per i cittadini con attività. Il vincolo di cittadinanza è applicato
+# in controlli.precondizione_attivita, come già accade per la tabella richieste.
+SCHEMA_ATTIVITA = """
+CREATE TABLE IF NOT EXISTS attivita (
+    attivita_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id            INTEGER NOT NULL,
+    owner_username      TEXT,
+    nome_attivita       TEXT NOT NULL,
+    tipologia           TEXT NOT NULL,
+    descrizione         TEXT NOT NULL,
+    contatto_link       TEXT,
+    stato               TEXT NOT NULL DEFAULT 'ATTIVA',
+    chat_id_pubblico    TEXT,
+    message_id_pubblico INTEGER,
+    created_at          TEXT NOT NULL,
+    admin_id            INTEGER,
+    admin_username      TEXT,
+    data_moderazione    TEXT,
+    notifiche           TEXT
+)
+"""
+
+
 def init_db(db_path: Path | str) -> None:
-    """Crea le tabelle se non esistono e prova ad aggiungere l'indice unico.
+    """Crea le tabelle se non esistono e prova ad aggiungere gli indici unici.
 
     Lo schema delle tabelle è identico a quello delle versioni precedenti: un
     registro.db già esistente continua a funzionare senza migrazioni.
@@ -74,6 +102,7 @@ def init_db(db_path: Path | str) -> None:
     with apri_db(db_path) as conn:
         conn.execute(SCHEMA_CITTADINI)
         conn.execute(SCHEMA_RICHIESTE)
+        conn.execute(SCHEMA_ATTIVITA)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_richieste_stato "
             "ON richieste(telegram_id, stato)"
@@ -90,4 +119,27 @@ def init_db(db_path: Path | str) -> None:
                 "Impossibile creare l'indice unico su cittadini.telegram_id: "
                 "nel registro esistono ID Telegram duplicati. Rimuovili con "
                 "/rimuovi per attivare la protezione contro i doppioni."
+            )
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_attivita_stato ON attivita(stato)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_attivita_owner "
+            "ON attivita(owner_id, stato)"
+        )
+        try:
+            # Rete di sicurezza per la regola «un nome per proprietario»: essendo
+            # un indice parziale vale solo fra le attività ATTIVE, così un nome
+            # torna libero dopo una rimozione d'ufficio.
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_attivita_nome_owner "
+                "ON attivita(owner_id, nome_attivita COLLATE NOCASE) "
+                "WHERE stato = 'ATTIVA'"
+            )
+        except sqlite3.IntegrityError:
+            logger.warning(
+                "Impossibile creare l'indice unico su "
+                "attivita(owner_id, nome_attivita): nel registro esistono "
+                "attività attive con lo stesso nome e lo stesso proprietario."
             )

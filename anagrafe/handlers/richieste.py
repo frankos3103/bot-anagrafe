@@ -2,62 +2,18 @@
 
 from __future__ import annotations
 
-import logging
-
 from telegram import InlineKeyboardMarkup, Update
-from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from .. import repository
 from ..logbook import send_log
 from .common import db, get_roles
-
-logger = logging.getLogger(__name__)
+from .notifiche import aggiorna_copie_notifica, avvisa_in_privato
 
 STATI_LEGGIBILI = {
     repository.STATO_ACCETTATA: "già accettata",
     repository.STATO_RIFIUTATA: "già rifiutata",
 }
-
-
-async def _aggiorna_notifiche_admin(
-    context: ContextTypes.DEFAULT_TYPE,
-    notifiche_json: str | None,
-    testo_finale: str,
-    salta: tuple[int, int] | None = None,
-) -> None:
-    """Aggiorna la copia della notifica ricevuta da ogni admin.
-
-    Così tutti vedono l'esito, non solo chi ha cliccato. `salta` evita di
-    modificare due volte il messaggio già aggiornato sulla query.
-    """
-    for chat_id, message_id in repository.load_request_notifications(notifiche_json):
-        if salta and (chat_id, message_id) == salta:
-            continue
-        try:
-            await context.bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=testo_finale,
-                reply_markup=InlineKeyboardMarkup([]),
-            )
-        except TelegramError as exc:
-            logger.warning(
-                "Impossibile aggiornare la notifica in chat %s (msg %s): %s",
-                chat_id,
-                message_id,
-                exc,
-            )
-
-
-async def _avvisa_richiedente(
-    context: ContextTypes.DEFAULT_TYPE, telegram_id: int, testo: str
-) -> None:
-    try:
-        await context.bot.send_message(chat_id=telegram_id, text=testo)
-    except TelegramError:
-        # Il richiedente potrebbe non aver mai avviato il bot in privato.
-        pass
 
 
 async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -119,7 +75,7 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 await query.edit_message_text(
                     testo_finale, reply_markup=InlineKeyboardMarkup([])
                 )
-                await _aggiorna_notifiche_admin(
+                await aggiorna_copie_notifica(
                     context, riga["notifiche"], testo_finale, salta=corrente
                 )
                 await send_log(
@@ -140,10 +96,10 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 f"{nominativo} è ora cittadino #{citizen_id}."
             )
             await query.edit_message_text(testo_finale, reply_markup=InlineKeyboardMarkup([]))
-            await _aggiorna_notifiche_admin(
+            await aggiorna_copie_notifica(
                 context, riga["notifiche"], testo_finale, salta=corrente
             )
-            await _avvisa_richiedente(
+            await avvisa_in_privato(
                 context,
                 riga["telegram_id"],
                 "🎉 La tua richiesta di cittadinanza è stata accettata!\n"
@@ -167,10 +123,10 @@ async def on_richiesta_callback(update: Update, context: ContextTypes.DEFAULT_TY
             f"❌ Richiesta #{request_id} rifiutata da {admin_username}.\n{nominativo}"
         )
         await query.edit_message_text(testo_finale, reply_markup=InlineKeyboardMarkup([]))
-        await _aggiorna_notifiche_admin(
+        await aggiorna_copie_notifica(
             context, riga["notifiche"], testo_finale, salta=corrente
         )
-        await _avvisa_richiedente(
+        await avvisa_in_privato(
             context,
             riga["telegram_id"],
             "Purtroppo la tua richiesta di cittadinanza è stata rifiutata.",

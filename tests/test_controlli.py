@@ -122,3 +122,55 @@ def test_admin_rimovibile(roles, root_id):
     controlli.verifica_admin_rimovibile(roles, 222)
     with pytest.raises(ErroreValidazione, match="root"):
         controlli.verifica_admin_rimovibile(roles, root_id)
+
+
+# ----------------------------------------------------------------------
+# Registro delle attività
+# ----------------------------------------------------------------------
+
+def test_solo_un_cittadino_puo_iscrivere_unattivita(conn, cittadino):
+    riga = controlli.precondizione_attivita(conn, 12345)
+    assert riga["citizen_id"] == cittadino
+
+
+def test_un_estraneo_viene_rimandato_a_richiedi(conn):
+    """È il requisito di cittadinanza del D.M. n.3 del 13/10/2026."""
+    with pytest.raises(ErroreValidazione, match="/richiedi"):
+        controlli.precondizione_attivita(conn, 99999)
+
+
+def test_nome_libero(conn, cittadino):
+    assert controlli.verifica_nome_attivita_libero(conn, 12345, "Bar Nuovo") == "Bar Nuovo"
+
+
+def test_nome_gia_usato_dallo_stesso_proprietario(conn, cittadino, attivita):
+    with pytest.raises(ErroreValidazione, match=f"#{attivita}"):
+        controlli.verifica_nome_attivita_libero(conn, 12345, "pizzeria da mario")
+
+
+def test_lo_stesso_nome_di_un_altro_proprietario_e_ammesso(conn, cittadino, attivita):
+    assert controlli.verifica_nome_attivita_libero(conn, 777, "Pizzeria Da Mario")
+
+
+def test_il_nome_di_unattivita_rimossa_torna_libero(conn, cittadino, attivita):
+    repository.chiudi_attivita(conn, attivita, repository.ATTIVITA_RIMOSSA, 100, "capo")
+    assert controlli.verifica_nome_attivita_libero(conn, 12345, "Pizzeria Da Mario")
+
+
+def test_risolvi_attivita(conn, cittadino, attivita):
+    assert controlli.risolvi_attivita(conn, attivita)["attivita_id"] == attivita
+
+
+def test_risolvi_attivita_inesistente(conn):
+    with pytest.raises(ErroreValidazione, match="#999"):
+        controlli.risolvi_attivita(conn, 999)
+
+
+def test_attivita_moderabile(conn, cittadino, attivita):
+    assert controlli.verifica_attivita_moderabile(conn, attivita)["stato"] == "ATTIVA"
+
+
+def test_attivita_gia_moderata(conn, cittadino, attivita):
+    repository.chiudi_attivita(conn, attivita, repository.ATTIVITA_RIMOSSA, 100, "capo")
+    with pytest.raises(ErroreValidazione, match="rimossa"):
+        controlli.verifica_attivita_moderabile(conn, attivita)
