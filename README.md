@@ -46,11 +46,11 @@ Pubblico delle Attività, e registra ogni modifica su un canale Telegram di log.
   (`/inserisci_cittadino`), rimozione (`/rimuovi_cittadino`) e **import di massa da CSV**
   (`/importa_cittadini`).
 - **Registro Pubblico delle Attività** (`/registra_attivita`, `/elenco_attivita`):
-  ogni cittadino iscrive gratuitamente la propria organizzazione, associazione
-  o attività privata. L'iscrizione è immediata, la scheda viene pubblicata
-  sulla Gazzetta Ciompista e il Ministero dell'Interno può rifiutarla o
-  eliminarla d'ufficio *dopo* (vedi sotto). Il proprietario può ritirare la
-  propria attività con `/rimuovi_attivita`.
+  ogni cittadino propone gratuitamente la propria organizzazione, associazione
+  o attività privata. Gli amministratori la **approvano o la rifiutano** con
+  due pulsanti; solo all'approvazione entra nel registro e viene pubblicata
+  sulla Gazzetta Ciompista. Il proprietario può poi ritirarla con
+  `/rimuovi_attivita`.
 - **Tre livelli di autorizzazione**: pubblico, amministratore, root.
 - **Pulsantiera guidata a due livelli** (`/menu`): prima si sceglie l'area
   (*Cittadinanza*, *Attività*, *Amministrazione*), poi l'azione. Esegue tutti i
@@ -158,7 +158,6 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | `/tagga_cittadini` | Menziona tutti i cittadini che hanno uno username. |
 | `/importa_cittadini` | Importa più cittadini da un file CSV (vedi sotto). |
 | `/importa_attivita` | Importa più attività da un file CSV (vedi sotto). |
-| `/modera_attivita <ID_attività>` | Rimanda la scheda di un'attività con i pulsanti *Rifiuta* / *Elimina*, utile se la notifica è andata perduta. |
 
 ### Root
 
@@ -345,35 +344,48 @@ riavviare il bot. Le righe vuote e quelle che iniziano con `#` sono ignorate.
 
 ## Registro Pubblico delle Attività
 
-Istituito dal **Decreto Ministeriale n. 3 del 13 ottobre 2026**. L'iscrizione è
-gratuita e **non richiede approvazione preventiva**: il controllo del Ministero
-dell'Interno è *successivo*.
+Istituito dal **Decreto Ministeriale n. 3 del 13 ottobre 2026**, con una
+differenza rispetto al testo originale: il controllo del Ministero dell'Interno
+è **preventivo**. Un'attività entra nel registro solo se approvata.
 
-**1. Iscrizione** — `/registra_attivita` (o il pulsante *Registra attività* in `/menu`)
-apre una procedura guidata che chiede nome, tipologia (*Organizzazione*,
-*Associazione*, *Attività Privata*, scelta con i pulsanti), descrizione e un
-contatto facoltativo, e si chiude con un riepilogo da confermare. È riservata
-ai **cittadini già iscritti all'anagrafe**: a chi non lo è il bot risponde
-rimandandolo a `/richiedi_cittadinanza`. Ogni cittadino può iscrivere più attività, ma non
-due attive con lo stesso nome.
+**1. Proposta** — `/registra_attivita` (o il pulsante *Registra* nella sezione
+*Attività* di `/menu`) apre una procedura guidata che chiede nome, tipologia
+(*Organizzazione*, *Associazione*, *Attività Privata*, scelta con i pulsanti),
+descrizione e un contatto facoltativo, e si chiude con un riepilogo da
+confermare. È riservata ai **cittadini già iscritti all'anagrafe**: a chi non
+lo è il bot risponde rimandandolo a `/richiedi_cittadinanza`.
 
-**2. Pubblicazione** — alla conferma l'attività è subito attiva e la sua scheda
-viene pubblicata sulla **Gazzetta Ciompista** (il canale di
-`GAZZETTA_CHANNEL_ID`). Se il canale non è configurato o non è raggiungibile
-l'attività viene iscritta comunque, e il bot lo dice: il Registro vive nel
-database, la Gazzetta ne è una vista.
+Alla conferma nasce una **proposta**, non un'attività: nel registro non entra
+nulla, non viene pubblicato nulla, e il proponente lo sa.
 
-**3. Consultazione** — `/elenco_attivita` elenca le attività attive. Come
-`/elenco_cittadini`, non genera menzioni: gli username in elenco non notificano nessuno.
-Nella scheda pubblicata in Gazzetta, invece, il contatto è un tag vero.
+**2. Esame** — ogni amministratore riceve in privato la scheda della proposta
+con due pulsanti:
 
-**4. Ritiro** — `/rimuovi_attivita` toglie un'attività dal Registro. Dalla
-pulsantiera si sceglie dall'elenco delle proprie attività, senza cercarne l'ID;
-il comando accetta comunque `/rimuovi_attivita 7` per chi preferisce digitare.
-Chi può usarlo non dipende dal ruolo ma dalla **proprietà**: il cittadino sulle
-proprie attività, l'amministratore su qualunque. Chi indica un'attività che non
-è sua riceve lo stesso messaggio che riceverebbe per un ID inesistente, così un
-ID indovinato non rivela nulla.
+- **✅ Approva** — l'attività viene iscritta al registro e la sua scheda
+  pubblicata sulla Gazzetta Ciompista; il proponente viene avvisato;
+- **❌ Rifiuta** — la proposta viene **cancellata**. Nel registro non entra
+  nulla e nel database non resta traccia; il proponente viene avvisato.
+
+In entrambi i casi la copia della notifica di *tutti* gli amministratori viene
+aggiornata con l'esito, e sul canale di log compare una riga. Se due
+amministratori premono nello stesso istante vince il primo e il secondo riceve
+un avviso: è la cancellazione della proposta a fare da lucchetto.
+
+Un cittadino non può avere due proposte in attesa con lo stesso nome, né
+proporre il nome di un'attività che ha già iscritta. Dopo un rifiuto il nome
+torna libero.
+
+**3. Consultazione** — `/elenco_attivita` elenca le attività approvate. Come
+`/elenco_cittadini`, non genera menzioni: gli username in elenco non notificano
+nessuno. Nella scheda pubblicata in Gazzetta, invece, il contatto è un tag vero.
+
+**4. Ritiro** — `/rimuovi_attivita` toglie dal registro un'attività già
+approvata. Dalla pulsantiera si sceglie dall'elenco delle proprie attività,
+senza cercarne l'ID; il comando accetta comunque `/rimuovi_attivita 7` per chi
+preferisce digitare. Chi può usarlo non dipende dal ruolo ma dalla
+**proprietà**: il cittadino sulle proprie attività, l'amministratore su
+qualunque. Chi indica un'attività che non è sua riceve lo stesso messaggio che
+riceverebbe per un ID inesistente, così un ID indovinato non rivela nulla.
 
 I due casi restano distinti negli atti:
 
@@ -385,32 +397,19 @@ I due casi restano distinti negli atti:
 Un amministratore che ritira la *propria* attività fa un ritiro volontario, non
 un atto d'ufficio: lo stato dipende da chi agisce, non dal ruolo che ha.
 
-**5. Correzione: si rimuove e si reimmette** — non esiste un comando per
-modificare un'attività. Per correggerla si usa `/rimuovi_attivita` e poi di
-nuovo `/registra_attivita`: il vincolo «un nome per proprietario» vale solo fra
-le attività attive, quindi il nome torna subito disponibile. Da sapere: la
-nuova iscrizione ha un **ID diverso** e un **post nuovo** in Gazzetta, e fa
-ripartire la notifica al Ministero. Per un registro pubblico è il comportamento
-corretto — una voce corretta è una voce nuova — ma l'ID cambia.
-
-**6. Moderazione** — appena un'attività è iscritta, ogni amministratore
-(il Ministero dell'Interno) riceve in privato la sua scheda con due pulsanti:
-
-- **❌ Rifiuta** — la voce è illegittima o legata a un profilo non riconosciuto;
-- **➖ Elimina** — la voce va rimossa d'ufficio dal Registro.
-
-In entrambi i casi il bot aggiorna la copia della notifica di *tutti* gli
-amministratori, toglie il post dalla Gazzetta, avvisa il proprietario e scrive
-sul canale di log. Il record resta nel database con lo stato `RIFIUTATA` o
-`RIMOSSA`, insieme a chi ha deciso e quando: la moderazione resta agli atti, e
-il nome torna libero. Se due amministratori premono il pulsante nello stesso
-istante vince il primo, e il secondo riceve un avviso.
-
 Il post in Gazzetta viene **cancellato**. Se Telegram non lo consente più (un
 post oltre le 48 ore, il bot rimosso dal canale) viene riscritto segnalando la
-rimozione d'ufficio; se non riesce nemmeno quello, il bot lo dice
-all'amministratore e lo annota nel log — ma la moderazione nel database resta
-valida in ogni caso.
+rimozione; se non riesce nemmeno quello, il bot lo dice all'amministratore e lo
+annota nel log — ma la rimozione nel database resta valida in ogni caso.
+
+**5. Correzione: si rimuove e si ripropone** — non esiste un comando per
+modificare un'attività. Per correggerla si usa `/rimuovi_attivita` e poi di
+nuovo `/registra_attivita`: il vincolo «un nome per proprietario» vale fra le
+attività attive e le proposte in attesa, quindi il nome torna subito
+disponibile. Da sapere: la nuova proposta **va di nuovo approvata**, e una
+volta approvata ha un **ID diverso** e un **post nuovo** in Gazzetta. Per un
+registro pubblico è il comportamento corretto — una voce corretta è una voce
+nuova — ma l'ID cambia e serve un secondo passaggio del Ministero.
 
 ---
 
@@ -421,7 +420,7 @@ Se imposti `LOG_CHANNEL_ID`, il bot scrive sul canale un messaggio per ogni:
 - nuova richiesta di cittadinanza, e ogni accettazione / rifiuto / annullamento;
 - inserimento o rimozione di un cittadino;
 - import CSV andato a buon fine;
-- iscrizione, ritiro, rifiuto o eliminazione di un'attività del Registro Pubblico;
+- proposta, approvazione, rifiuto e ritiro di un'attività del Registro Pubblico;
 - promozione o revoca di un amministratore;
 - aggiornamento automatico di uno username (anche quando un tag passa a un altro utente).
 
@@ -528,7 +527,7 @@ di notifica inviati agli amministratori, per poterli aggiornare tutti).
 
 **`attivita`** — `attivita_id` (PK), `owner_id` (ID Telegram del proprietario),
 `owner_username`, `nome_attivita`, `tipologia`, `descrizione`, `contatto_link`,
-`stato` (`ATTIVA` / `CHIUSA` / `RIMOSSA` / `RIFIUTATA`), `chat_id_pubblico` e
+`stato` (`ATTIVA` / `CHIUSA` / `RIMOSSA`), `chat_id_pubblico` e
 `message_id_pubblico` (il post in Gazzetta, per poterlo togliere),
 `created_at`, `admin_id`, `admin_username`, `data_moderazione`, `notifiche`.
 
@@ -540,8 +539,19 @@ fallire ogni inserimento, e senza `ON DELETE` impedirebbe di rimuovere un
 cittadino che ha delle attività. Il requisito di cittadinanza è applicato in
 `controlli.precondizione_attivita`, come già accade per `richieste`.
 
-Le colonne `admin_id`, `admin_username` e `data_moderazione` registrano *chi ha
-chiuso* l'attività: per un ritiro volontario è il proprietario stesso, e lo
+**`proposte_attivita`** — `proposta_id` (PK), `owner_id`, `owner_username`,
+`nome_attivita`, `tipologia`, `descrizione`, `contatto_link`, `created_at`,
+`notifiche`.
+
+Non ha una colonna di stato perché non ha stati: una riga esiste **solo mentre
+la proposta è in attesa**. Approvarla la sposta in `attivita`, rifiutarla la
+cancella. È questo che rende la `DELETE` stessa il lucchetto contro due
+amministratori che decidono insieme: il primo cancella la riga, il secondo non
+la trova più. L'approvazione fa le due scritture in una sola transazione, così
+se l'iscrizione fallisce la proposta resta dov'era.
+
+Le colonne `admin_id`, `admin_username` e `data_moderazione` di `attivita`
+registrano *chi ha approvato* e poi *chi ha chiuso* l'attività: per un ritiro volontario è il proprietario stesso, e lo
 `stato` dice in quale veste. L'indice unico su `(owner_id, nome_attivita)` è
 **parziale**, limitato alle attività `ATTIVA`: è ciò che permette di correggere
 un'attività rimuovendola e reimmettendola con lo stesso nome.

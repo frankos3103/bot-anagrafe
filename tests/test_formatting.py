@@ -14,7 +14,7 @@ from anagrafe.formatting import (
     post_gazzetta_rimosso,
     riga_attivita,
     riga_elenco,
-    scheda_moderazione,
+    scheda_proposta,
     spezza_in_blocchi,
     username_o_placeholder,
     username_senza_tag,
@@ -162,6 +162,21 @@ def attivita(**modifiche):
     return riga
 
 
+def proposta(**modifiche):
+    riga = {
+        "proposta_id": 4,
+        "owner_id": 12345,
+        "owner_username": "mariorossi",
+        "nome_attivita": "Pizzeria Da Mario",
+        "tipologia": "privata",
+        "descrizione": "Pizza al taglio, forno a legna.",
+        "contatto_link": "@pizzeriadamario",
+        "created_at": "2026-10-19",
+    }
+    riga.update(modifiche)
+    return riga
+
+
 # Un nome che prova a iniettare un link nel post pubblico.
 OSTILE = "Bar [clicca](http://spam.it)"
 
@@ -224,32 +239,35 @@ def test_nella_gazzetta_il_tag_e_un_tag_vero():
     assert SPAZIO_LARGHEZZA_ZERO not in post_gazzetta(attivita())
 
 
-def test_la_scheda_admin_non_ha_bisogno_di_escape():
+def test_la_scheda_della_proposta_non_ha_bisogno_di_escape():
     """Va inviata senza parse_mode: il testo dell'utente resta tale e quale."""
-    testo = scheda_moderazione(attivita(nome_attivita=OSTILE), {"username": "mariorossi", "citizen_id": 3})
+    testo = scheda_proposta(
+        proposta(nome_attivita=OSTILE), {"username": "mariorossi", "citizen_id": 3}
+    )
     assert OSTILE in testo
     assert "cittadino #3" in testo
 
 
-def test_la_scheda_admin_segnala_il_proprietario_sparito():
-    testo = scheda_moderazione(attivita(), None)
-    assert "non risulta iscritto" in testo
+def test_la_scheda_della_proposta_segnala_il_proprietario_sparito():
+    assert "non risulta iscritto" in scheda_proposta(proposta(), None)
 
 
-def test_la_scheda_admin_di_unattivita_moderata():
-    testo = scheda_moderazione(
-        attivita(stato="RIMOSSA", data_moderazione="2026-10-19",
-                 admin_id=100, admin_username="capo"),
-        None,
-    )
-    assert "RIMOSSA" in testo
-    assert "2026-10-19" in testo
-    assert "Ministero dell'Interno" not in testo  # niente invito a moderare
+def test_la_scheda_della_proposta_cita_il_suo_numero():
+    testo = scheda_proposta(proposta(proposta_id=7), None)
+    assert "#7" in testo
 
 
-def test_la_scheda_admin_attiva_invita_a_moderare():
-    testo = scheda_moderazione(attivita(), None)
-    assert "Ministero dell'Interno" in testo
+def test_la_scheda_della_proposta_spiega_le_due_conseguenze():
+    """Chi esamina deve sapere cosa succede premendo l'uno o l'altro pulsante."""
+    testo = scheda_proposta(proposta(), None)
+    assert "Registro Pubblico" in testo
+    assert "Gazzetta" in testo
+    assert "non ne resta" in testo
+
+
+def test_la_scheda_della_proposta_non_tagga_il_proprietario():
+    """Un elenco di proposte non deve notificare chi le ha proposte."""
+    assert SPAZIO_LARGHEZZA_ZERO in scheda_proposta(proposta(), None)
 
 
 @pytest.mark.parametrize(

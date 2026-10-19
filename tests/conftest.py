@@ -68,3 +68,19 @@ def attivita(conn, cittadino):
         descrizione="Pizza al taglio, forno a legna.",
         contatto_link="@pizzeriadamario",
     )
+
+
+@pytest.fixture
+def proposta(conn, cittadino):
+    """Una proposta di attività in attesa, del `cittadino` di prova."""
+    from anagrafe import repository
+
+    return repository.crea_proposta(
+        conn,
+        owner_id=12345,
+        owner_username="mariorossi",
+        nome_attivita="Bar Nuovo",
+        tipologia="privata",
+        descrizione="Caffè e cornetti.",
+        contatto_link="@barnuovo",
+    )

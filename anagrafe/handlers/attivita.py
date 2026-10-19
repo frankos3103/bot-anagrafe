@@ -1,10 +1,12 @@
-"""Il Registro Pubblico delle Attività (D.M. n.3 del 13/10/2026).
+"""Il Registro Pubblico delle Attività: proposta, approvazione, rimozione.
 
-Un cittadino iscrive la propria attività e questa è attiva subito: il decreto
-non prevede un'approvazione preventiva. La scheda viene pubblicata sulla
-Gazzetta Ciompista e il Ministero dell'Interno (gli amministratori) riceve una
-notifica con i pulsanti per rifiutarla o eliminarla d'ufficio: il controllo è
-successivo, non preventivo.
+Un cittadino **propone** la propria attività; nel registro non entra nulla
+finché un amministratore non **approva**. All'approvazione l'attività viene
+iscritta e la sua scheda pubblicata sulla Gazzetta Ciompista; al rifiuto la
+proposta viene cancellata e nel database non resta traccia.
+
+Dopo l'approvazione l'attività si può rimuovere: il proprietario ritira la
+propria (stato CHIUSA), un amministratore la rimuove d'ufficio (RIMOSSA).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import logging
 import sqlite3
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from .. import controlli, repository
@@ -27,37 +30,18 @@ from ..esportazione import FORMATO_PREDEFINITO, esporta_attivita
 from ..formatting import (
     escape_markdown_legacy,
     riga_attivita,
-    scheda_moderazione,
+    scheda_proposta,
     spezza_in_blocchi,
 )
 from ..logbook import fmt_username, fmt_utente, send_log
-from ..roles import Role
 from ..validators import ErroreValidazione, valida_attivita_id, valida_scelta
-from .common import argomenti, db, get_roles, richiede, rispondi
+from .common import argomenti, db, get_roles, rispondi
 from .gazzetta import POST_CANCELLATO, POST_FALLITO, chiudi_post, pubblica_attivita
 from .notifiche import aggiorna_copie_notifica, avvisa_in_privato, invia_notifiche_admin
 
 logger = logging.getLogger(__name__)
 
 Valori = dict
-
-# I due verbi del decreto: «rifiutare» una voce illegittima o legata a un
-# profilo non riconosciuto, «eliminare» una voce dal Registro. Spariscono
-# entrambe dall'elenco pubblico; la distinzione resta agli atti.
-AZIONI_MODERAZIONE = {
-    "rifiuta": repository.ATTIVITA_RIFIUTATA,
-    "elimina": repository.ATTIVITA_RIMOSSA,
-}
-
-VERBO_MODERAZIONE = {
-    repository.ATTIVITA_RIFIUTATA: "rifiutata",
-    repository.ATTIVITA_RIMOSSA: "eliminata dal Registro",
-}
-
-EMOJI_MODERAZIONE = {
-    repository.ATTIVITA_RIFIUTATA: "❌",
-    repository.ATTIVITA_RIMOSSA: "➖",
-}
 
 # Un ritiro volontario e un atto d'ufficio si raccontano in modo diverso, pur
 # producendo lo stesso effetto sull'elenco pubblico.
@@ -72,16 +56,16 @@ AVVISO_GAZZETTA = (
 )
 
 
-def tastiera_moderazione(attivita_id: int) -> InlineKeyboardMarkup:
-    """I pulsanti riservati al Ministero dell'Interno."""
+def tastiera_proposta(proposta_id: int) -> InlineKeyboardMarkup:
+    """I due pulsanti dell'esame: approvare o rifiutare."""
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    "❌ Rifiuta", callback_data=f"attivita:rifiuta:{attivita_id}"
+                    "✅ Approva", callback_data=f"attivita:approva:{proposta_id}"
                 ),
                 InlineKeyboardButton(
-                    "➖ Elimina", callback_data=f"attivita:elimina:{attivita_id}"
+                    "❌ Rifiuta", callback_data=f"attivita:rifiuta:{proposta_id}"
                 ),
             ]
         ]
@@ -89,13 +73,13 @@ def tastiera_moderazione(attivita_id: int) -> InlineKeyboardMarkup:
 
 
 # ----------------------------------------------------------------------
-# Iscrizione
+# Proposta
 # ----------------------------------------------------------------------
 
 async def azione_registra_attivita(
     update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori
 ) -> None:
-    """Iscrive l'attività, la pubblica in Gazzetta e avvisa il Ministero."""
+    """Propone l'attività e la manda all'esame degli amministratori."""
     utente = update.effective_user
     nome = valori["nome_attivita"]
 
@@ -106,7 +90,7 @@ async def azione_registra_attivita(
             # dall'anagrafe e il nome può essere stato occupato.
             cittadino = controlli.precondizione_attivita(conn, utente.id)
             controlli.verifica_nome_attivita_libero(conn, utente.id, nome)
-            attivita_id = repository.create_attivita(
+            proposta_id = repository.crea_proposta(
                 conn,
                 owner_id=utente.id,
                 owner_username=utente.username,
@@ -119,46 +103,34 @@ async def azione_registra_attivita(
             await rispondi(update, f"⚠️ {exc}")
             return
         except sqlite3.IntegrityError:
-            # L'indice unico parziale: due conferme nello stesso istante.
+            # L'indice unico: due conferme nello stesso istante.
             await rispondi(
-                update,
-                f"⚠️ Hai già registrato un'attività con il nome «{nome}».",
+                update, f"⚠️ Hai già proposto un'attività con il nome «{nome}»."
             )
             return
 
-        riga = repository.get_attivita(conn, attivita_id)
-
-    riferimento = await pubblica_attivita(context, riga)
-    if riferimento is not None:
-        with db(context) as conn:
-            repository.set_attivita_post(conn, attivita_id, *riferimento)
-        esito_pubblicazione = "📢 La scheda è stata pubblicata sulla Gazzetta Ciompista."
-    else:
-        esito_pubblicazione = (
-            "⚠️ La Gazzetta Ciompista non è raggiungibile: l'attività è iscritta "
-            "ma non ancora pubblicata."
-        )
+        proposta = repository.get_proposta(conn, proposta_id)
 
     await rispondi(
         update,
-        "✅ Attività iscritta al Registro Pubblico delle Attività!\n"
-        f"🆔 ID attività: #{attivita_id}\n"
-        f"🏪 Nome: {nome}\n\n"
-        f"{esito_pubblicazione}",
+        f"⏳ Proposta #{proposta_id} inviata!\n"
+        f"🏪 {nome}\n\n"
+        "Un amministratore la esaminerà a breve. L'attività comparirà nel "
+        "Registro Pubblico e sulla Gazzetta Ciompista solo dopo l'approvazione.",
     )
 
     notifiche, non_raggiungibili = await invia_notifiche_admin(
         context,
         get_roles(context).tutti_gli_admin(),
-        scheda_moderazione(riga, cittadino),
-        tastiera_moderazione(attivita_id),
+        scheda_proposta(proposta, cittadino),
+        tastiera_proposta(proposta_id),
     )
     with db(context) as conn:
-        repository.set_attivita_notifiche(conn, attivita_id, notifiche)
+        repository.set_proposta_notifiche(conn, proposta_id, notifiche)
 
     await send_log(
         context,
-        f"➕ *Attività iscritta* #{attivita_id}\n"
+        f"⏳ *Attività proposta* #{proposta_id}\n"
         f"Da: {fmt_utente(utente)}\n"
         f"{escape_markdown_legacy(nome)} — "
         f"{etichetta_tipologia(valori['tipologia'])}",
@@ -168,14 +140,14 @@ async def azione_registra_attivita(
         await rispondi(
             update,
             "⚠️ Attenzione: non sono riuscito a notificare in privato "
-            f"{len(non_raggiungibili)} amministratore/i del Ministero. Devono "
-            "prima avviare una chat privata con il bot (premendo /start in "
-            "privato) per poter ricevere le notifiche del Registro.",
+            f"{len(non_raggiungibili)} amministratore/i. Devono prima avviare "
+            "una chat privata con il bot (premendo /start in privato) per poter "
+            "esaminare le proposte.",
         )
 
 
 # ----------------------------------------------------------------------
-# Consultazione pubblica
+# Consultazione pubblica ed export
 # ----------------------------------------------------------------------
 
 async def azione_elenco_attivita(
@@ -183,9 +155,15 @@ async def azione_elenco_attivita(
 ) -> None:
     with db(context) as conn:
         righe = repository.list_attivita_attive(conn)
+        in_attesa = repository.count_proposte(conn)
 
     if not righe:
-        await rispondi(update, "Il Registro Pubblico delle Attività è vuoto.")
+        testo = "Il Registro Pubblico delle Attività è vuoto."
+        if in_attesa:
+            testo += (
+                f"\nCi sono {in_attesa} proposte in attesa di approvazione."
+            )
+        await rispondi(update, testo)
         return
 
     intestazione = f"📋 *Registro Pubblico delle Attività* \\({len(righe)}\\)"
@@ -196,7 +174,7 @@ async def azione_elenco_attivita(
 async def azione_esporta_attivita(
     update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori
 ) -> None:
-    """Esporta le attività attive: il file CSV si reimporta con /importa_attivita."""
+    """Esporta le attività approvate: il CSV si reimporta con /importa_attivita."""
     with db(context) as conn:
         righe = repository.list_attivita_attive(conn)
 
@@ -213,13 +191,20 @@ async def azione_esporta_attivita(
     )
 
 
+async def cmd_elenco_attivita(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    await azione_elenco_attivita(update, context, {})
+
+
 async def cmd_esporta_attivita(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
+    grezzo = argomenti(update)
     try:
         formato = (
-            valida_scelta(argomenti(update), ETICHETTE_FORMATO, "Il formato")
-            if argomenti(update)
+            valida_scelta(grezzo, ETICHETTE_FORMATO, "Il formato")
+            if grezzo
             else FORMATO_PREDEFINITO
         )
     except ErroreValidazione as exc:
@@ -232,7 +217,179 @@ async def cmd_esporta_attivita(
 
 
 # ----------------------------------------------------------------------
-# Rimozione
+# Esame delle proposte
+# ----------------------------------------------------------------------
+
+async def _approva(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, proposta_id: int
+) -> str:
+    """Iscrive l'attività proposta e la pubblica.
+
+    Restituisce il testo con cui riscrivere la notifica, o "" se la proposta
+    non c'è più o non si è potuta iscrivere.
+    """
+    query = update.callback_query
+    admin = query.from_user
+
+    with db(context) as conn:
+        try:
+            esito = repository.approva_proposta(
+                conn, proposta_id, admin.id, admin.username
+            )
+        except sqlite3.IntegrityError:
+            # Nel frattempo quel nome è stato occupato: la transazione annulla
+            # anche la cancellazione, quindi la proposta resta in attesa.
+            await query.answer(
+                "Quel nome risulta ora occupato: la proposta resta in attesa.",
+                show_alert=True,
+            )
+            return ""
+
+        if esito is None:
+            return ""
+
+        attivita_id, proposta = esito
+        riga = repository.get_attivita(conn, attivita_id)
+
+    riferimento = await pubblica_attivita(context, riga)
+    if riferimento is not None:
+        with db(context) as conn:
+            repository.set_attivita_post(conn, attivita_id, *riferimento)
+        esito_post = "📢 Pubblicata sulla Gazzetta Ciompista."
+    else:
+        esito_post = (
+            "⚠️ La Gazzetta Ciompista non è raggiungibile: l'attività è iscritta "
+            "ma non ancora pubblicata."
+        )
+
+    nome = proposta["nome_attivita"]
+    await avvisa_in_privato(
+        context,
+        proposta["owner_id"],
+        f"🎉 La tua attività «{nome}» è stata approvata!\n"
+        f"È iscritta al Registro Pubblico delle Attività con l'ID #{attivita_id}.",
+    )
+
+    await send_log(
+        context,
+        f"✅ *Attività approvata* #{attivita_id}\n"
+        f"{escape_markdown_legacy(nome)} — "
+        f"{etichetta_tipologia(proposta['tipologia'])}\n"
+        f"Proprietario: {fmt_username(proposta['owner_username'])} "
+        f"(Telegram ID {proposta['owner_id']})\n"
+        f"Approvata da: {fmt_utente(admin)}",
+    )
+
+    admin_username = f"@{admin.username}" if admin.username else admin.full_name
+    return (
+        f"✅ Proposta #{proposta_id} approvata da {admin_username}.\n"
+        f"{nome} è ora l'attività #{attivita_id}.\n\n{esito_post}"
+    )
+
+
+async def _rifiuta(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, proposta_id: int
+) -> str:
+    """Cancella la proposta: nel registro non entra nulla e non resta traccia."""
+    query = update.callback_query
+    admin = query.from_user
+
+    with db(context) as conn:
+        proposta = repository.rifiuta_proposta(conn, proposta_id)
+
+    if proposta is None:
+        return ""
+
+    nome = proposta["nome_attivita"]
+    await avvisa_in_privato(
+        context,
+        proposta["owner_id"],
+        f"❌ La tua proposta di attività «{nome}» non è stata approvata, "
+        "e non è stata iscritta al Registro Pubblico delle Attività.",
+    )
+
+    await send_log(
+        context,
+        f"❌ *Proposta rifiutata* #{proposta_id}\n"
+        f"{escape_markdown_legacy(nome)} — "
+        f"{etichetta_tipologia(proposta['tipologia'])}\n"
+        f"Proprietario: {fmt_username(proposta['owner_username'])} "
+        f"(Telegram ID {proposta['owner_id']})\n"
+        f"Rifiutata da: {fmt_utente(admin)}",
+    )
+
+    admin_username = f"@{admin.username}" if admin.username else admin.full_name
+    return f"❌ Proposta #{proposta_id} rifiutata da {admin_username}.\n{nome}"
+
+
+async def on_attivita_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """I pulsanti dell'esame: «attivita:approva:<id>» e «attivita:rifiuta:<id>»."""
+    query = update.callback_query
+    admin = query.from_user
+
+    if not get_roles(context).is_admin(admin.id):
+        await query.answer(
+            "Non sei autorizzato a esaminare le proposte di attività.",
+            show_alert=True,
+        )
+        return
+
+    try:
+        _, azione, proposta_id_str = query.data.split(":")
+        proposta_id = int(proposta_id_str)
+    except (ValueError, AttributeError):
+        await query.answer("Richiesta non valida.", show_alert=True)
+        return
+
+    if azione not in ("approva", "rifiuta"):
+        await query.answer("Azione non riconosciuta.", show_alert=True)
+        return
+
+    # Le notifiche si leggono prima: approvare o rifiutare cancella la proposta,
+    # e senza i loro riferimenti le copie degli altri admin resterebbero attive.
+    with db(context) as conn:
+        proposta = repository.get_proposta(conn, proposta_id)
+    notifiche_json = proposta["notifiche"] if proposta is not None else None
+
+    if azione == "approva":
+        testo_finale = await _approva(update, context, proposta_id)
+    else:
+        testo_finale = await _rifiuta(update, context, proposta_id)
+
+    if not testo_finale:
+        # La proposta non c'è più: un altro amministratore ha già deciso. Se
+        # l'iscrizione è stata respinta, invece, _approva ha già mostrato il
+        # suo alert e la proposta è ancora in attesa: la tastiera resta.
+        with db(context) as conn:
+            resta = repository.get_proposta(conn, proposta_id) is not None
+        if resta:
+            return
+
+        await query.answer("Questa proposta è già stata esaminata.", show_alert=True)
+        try:
+            # La tastiera stantia va via comunque, anche se l'aggiornamento
+            # della copia era fallito quando ha deciso l'altro amministratore.
+            await query.edit_message_text(
+                f"⚠️ Proposta #{proposta_id}: già esaminata da un altro "
+                "amministratore.",
+                reply_markup=InlineKeyboardMarkup([]),
+            )
+        except TelegramError as exc:
+            logger.warning("Impossibile aggiornare la notifica stantia: %s", exc)
+        return
+
+    await query.answer("Approvata." if azione == "approva" else "Rifiutata.")
+    corrente = (query.message.chat_id, query.message.message_id)
+    await query.edit_message_text(testo_finale, reply_markup=InlineKeyboardMarkup([]))
+    await aggiorna_copie_notifica(
+        context, notifiche_json, testo_finale, salta=corrente
+    )
+
+
+# ----------------------------------------------------------------------
+# Rimozione di un'attività già approvata
 # ----------------------------------------------------------------------
 
 async def azione_rimuovi_attivita(
@@ -289,14 +446,6 @@ async def azione_rimuovi_attivita(
 
     await rispondi(update, conferma)
 
-    # Le schede in mano al Ministero non devono restare con i pulsanti attivi:
-    # l'attività non è più moderabile.
-    await aggiorna_copie_notifica(
-        context,
-        riga["notifiche"],
-        f"➖ Attività #{attivita_id} {VERBO_RIMOZIONE[stato]}.\n{nome}",
-    )
-
     if not proprio:
         await avvisa_in_privato(
             context,
@@ -324,147 +473,6 @@ async def azione_rimuovi_attivita(
         )
 
 
-# ----------------------------------------------------------------------
-# Moderazione
-# ----------------------------------------------------------------------
-
-@richiede(Role.ADMIN)
-async def azione_modera_attivita(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori
-) -> None:
-    """Rimanda la scheda di un'attività, per moderare anche a notifica persa."""
-    with db(context) as conn:
-        try:
-            riga = controlli.risolvi_attivita(conn, valori["attivita"])
-        except ErroreValidazione as exc:
-            await rispondi(update, f"⚠️ {exc}")
-            return
-        cittadino = repository.get_citizen_by_telegram_id(conn, riga["owner_id"])
-
-    attiva = riga["stato"] == repository.ATTIVITA_ATTIVA
-    await rispondi(
-        update,
-        scheda_moderazione(riga, cittadino),
-        reply_markup=tastiera_moderazione(riga["attivita_id"]) if attiva else None,
-    )
-
-
-async def on_attivita_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    query = update.callback_query
-    admin = query.from_user
-
-    if not get_roles(context).is_admin(admin.id):
-        await query.answer(
-            "Non sei autorizzato a moderare il Registro delle Attività.",
-            show_alert=True,
-        )
-        return
-
-    try:
-        _, azione, attivita_id_str = query.data.split(":")
-        attivita_id = int(attivita_id_str)
-    except (ValueError, AttributeError):
-        await query.answer("Richiesta non valida.", show_alert=True)
-        return
-
-    stato = AZIONI_MODERAZIONE.get(azione)
-    if stato is None:
-        await query.answer("Azione non riconosciuta.", show_alert=True)
-        return
-
-    with db(context) as conn:
-        riga = repository.get_attivita(conn, attivita_id)
-        if riga is None:
-            await query.answer("Attività non trovata.", show_alert=True)
-            return
-
-        # È l'UPDATE condizionato a decidere, non una lettura precedente: due
-        # amministratori che premono il pulsante nello stesso istante non
-        # producono due moderazioni.
-        if not repository.chiudi_attivita(
-            conn, attivita_id, stato, admin.id, admin.username
-        ):
-            aggiornata = repository.get_attivita(conn, attivita_id)
-            etichetta = repository.ETICHETTE_STATO_ATTIVITA.get(
-                aggiornata["stato"], aggiornata["stato"]
-            )
-            await query.answer(
-                f"Questa attività è già {etichetta}.", show_alert=True
-            )
-            # La tastiera stantia va via comunque.
-            await query.edit_message_text(
-                f"⚠️ Attività #{attivita_id}: moderazione già registrata da "
-                f"{fmt_username(aggiornata['admin_username'])}.",
-                reply_markup=InlineKeyboardMarkup([]),
-            )
-            return
-
-    admin_username = f"@{admin.username}" if admin.username else admin.full_name
-    nominativo = f"{riga['nome_attivita']}"
-    emoji = EMOJI_MODERAZIONE[stato]
-    testo_finale = (
-        f"{emoji} Attività #{attivita_id} {VERBO_MODERAZIONE[stato]} "
-        f"da {admin_username}.\n{nominativo}"
-    )
-
-    esito_post = await chiudi_post(context, riga)
-    if esito_post == POST_CANCELLATO:
-        with db(context) as conn:
-            repository.set_attivita_post(conn, attivita_id, None, None)
-    elif esito_post == POST_FALLITO:
-        testo_finale += f"\n\n{AVVISO_GAZZETTA}"
-
-    await query.answer(f"Attività {VERBO_MODERAZIONE[stato]}.")
-    corrente = (query.message.chat_id, query.message.message_id)
-    await query.edit_message_text(testo_finale, reply_markup=InlineKeyboardMarkup([]))
-    await aggiorna_copie_notifica(
-        context, riga["notifiche"], testo_finale, salta=corrente
-    )
-
-    if stato == repository.ATTIVITA_RIFIUTATA:
-        avviso = (
-            f"❌ La tua attività «{nominativo}» (#{attivita_id}) è stata "
-            "rifiutata dal Ministero dell'Interno perché non conforme al "
-            "Decreto Ministeriale n.3 del 13/10/2026."
-        )
-    else:
-        avviso = (
-            f"➖ La tua attività «{nominativo}» (#{attivita_id}) è stata rimossa "
-            "d'ufficio dal Registro Pubblico delle Attività."
-        )
-    await avvisa_in_privato(context, riga["owner_id"], avviso)
-
-    await send_log(
-        context,
-        f"{emoji} *Attività {VERBO_MODERAZIONE[stato]}* #{attivita_id}\n"
-        f"{escape_markdown_legacy(nominativo)} — "
-        f"{etichetta_tipologia(riga['tipologia'])}\n"
-        f"Proprietario: {fmt_username(riga['owner_username'])} "
-        f"(Telegram ID {riga['owner_id']})\n"
-        f"Gestita da: {admin_username}",
-    )
-
-    if esito_post == POST_FALLITO:
-        await send_log(
-            context,
-            f"⚠️ *Gazzetta non aggiornata* — attività #{attivita_id}\n"
-            "Il post pubblico non si è potuto né cancellare né riscrivere: "
-            "va rimosso a mano.",
-        )
-
-
-# ----------------------------------------------------------------------
-# Comandi testuali
-# ----------------------------------------------------------------------
-
-async def cmd_elenco_attivita(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    await azione_elenco_attivita(update, context, {})
-
-
 async def cmd_rimuovi_attivita(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -472,20 +480,8 @@ async def cmd_rimuovi_attivita(
         attivita_id = valida_attivita_id(argomenti(update))
     except ErroreValidazione as exc:
         await rispondi(
-            update, f"⚠️ {exc}\n\n{render_uso(trova_comando('rimuovi_attivita'))}"
+            update,
+            f"⚠️ {exc}\n\n{render_uso(trova_comando('rimuovi_attivita'))}",
         )
         return
     await azione_rimuovi_attivita(update, context, {"attivita": attivita_id})
-
-
-async def cmd_modera_attivita(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    try:
-        attivita_id = valida_attivita_id(argomenti(update))
-    except ErroreValidazione as exc:
-        await rispondi(
-            update, f"⚠️ {exc}\n\n{render_uso(trova_comando('modera_attivita'))}"
-        )
-        return
-    await azione_modera_attivita(update, context, {"attivita": attivita_id})

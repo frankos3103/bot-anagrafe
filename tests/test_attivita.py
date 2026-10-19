@@ -136,7 +136,7 @@ def test_la_seconda_moderazione_non_passa(conn, cittadino, attivita):
         conn, attivita, repository.ATTIVITA_RIMOSSA, 100, "capo"
     )
     assert not repository.chiudi_attivita(
-        conn, attivita, repository.ATTIVITA_RIFIUTATA, 200, "altro"
+        conn, attivita, repository.ATTIVITA_RIMOSSA, 200, "altro"
     )
 
     riga = repository.get_attivita(conn, attivita)
@@ -236,6 +236,5 @@ def test_ogni_stato_ha_unetichetta_leggibile():
         repository.ATTIVITA_ATTIVA,
         repository.ATTIVITA_CHIUSA,
         repository.ATTIVITA_RIMOSSA,
-        repository.ATTIVITA_RIFIUTATA,
     ):
         assert repository.ETICHETTE_STATO_ATTIVITA[stato]

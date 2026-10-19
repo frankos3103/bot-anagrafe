@@ -216,13 +216,12 @@ def post_gazzetta_rimosso(row: Mapping) -> str:
     return "\n".join(righe)
 
 
-def scheda_moderazione(row: Mapping, cittadino: Mapping | None = None) -> str:
-    """La scheda in chiaro inviata agli amministratori del Ministero.
+def scheda_proposta(row: Mapping, cittadino: Mapping | None = None) -> str:
+    """La scheda di una proposta, in chiaro, per l'esame degli amministratori.
 
     Va inviata senza parse_mode: così nessun carattere scritto dall'utente può
-    far fallire l'invio della notifica di controllo. Se `cittadino` è None il
-    proprietario non risulta più iscritto all'anagrafe, e il Ministero deve
-    poterlo vedere.
+    far fallire l'invio. Se `cittadino` è None chi propone non risulta più
+    iscritto all'anagrafe, e chi esamina deve poterlo vedere.
     """
     if cittadino is not None:
         proprietario = (
@@ -236,29 +235,18 @@ def scheda_moderazione(row: Mapping, cittadino: Mapping | None = None) -> str:
         )
 
     righe = [
-        f"🏛 Attività iscritta al Registro — #{row['attivita_id']}",
+        f"🏛 Proposta di attività — #{row['proposta_id']}",
         "",
         f"🏪 Nome: {row['nome_attivita']}",
         f"🏷 Tipologia: {etichetta_tipologia(row['tipologia'])}",
         f"📝 {row['descrizione']}",
         f"📞 Contatto: {contatto_visibile(_valore(row, 'contatto_link'))}",
         "",
-        f"Proprietario: {proprietario}",
-        f"Iscritta il: {row['created_at']}",
+        f"Proposta da: {proprietario}",
+        f"Il: {row['created_at']}",
+        "",
+        "Approvandola entra nel Registro Pubblico e viene pubblicata sulla",
+        "Gazzetta Ciompista. Rifiutandola non viene iscritta e non ne resta",
+        "traccia.",
     ]
-
-    if _valore(row, "data_moderazione"):
-        righe += [
-            "",
-            f"Stato: {row['stato']}",
-            f"Moderata da: {username_senza_tag(_valore(row, 'admin_username'))} "
-            f"(ID {_valore(row, 'admin_id')}) il {row['data_moderazione']}",
-        ]
-    else:
-        righe += [
-            "",
-            "Ministero dell'Interno — Decreto Ministeriale n.3 del 13/10/2026.",
-            "Se non è conforme puoi rifiutarla, oppure eliminarla dal Registro.",
-        ]
-
     return "\n".join(righe)

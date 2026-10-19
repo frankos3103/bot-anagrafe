@@ -29,7 +29,6 @@ from ..validators import ErroreValidazione
 from .attivita import (
     azione_elenco_attivita,
     azione_esporta_attivita,
-    azione_modera_attivita,
     azione_registra_attivita,
     azione_rimuovi_attivita,
 )
@@ -375,7 +374,6 @@ AZIONI = {
     "elenco_attivita": azione_elenco_attivita,
     "esporta_attivita": azione_esporta_attivita,
     "rimuovi_attivita": azione_rimuovi_attivita,
-    "modera_attivita": azione_modera_attivita,
     "elenco_admin": azione_elenco_admin,
     "aggiungi_admin": azione_aggiungi_admin,
     "rimuovi_admin": azione_rimuovi_admin,

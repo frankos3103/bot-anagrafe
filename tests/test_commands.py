@@ -283,12 +283,12 @@ def test_etichetta_di_una_tipologia_sconosciuta():
 def test_i_comandi_del_registro_e_i_loro_ruoli():
     pubblici = nomi(Role.PUBBLICO)
     assert {"registra_attivita", "elenco_attivita"} <= pubblici
-    assert "modera_attivita" not in pubblici
-    assert "modera_attivita" in nomi(Role.ADMIN)
+    assert "importa_attivita" not in pubblici
+    assert "importa_attivita" in nomi(Role.ADMIN)
 
 
-def test_la_moderazione_non_sta_nel_menu_nativo():
-    assert "modera_attivita" not in {n for n, _ in comandi_menu_telegram()}
+def test_limport_delle_attivita_non_sta_nel_menu_nativo():
+    assert "importa_attivita" not in {n for n, _ in comandi_menu_telegram()}
 
 
 # ----------------------------------------------------------------------
@@ -417,7 +417,6 @@ def test_nessun_comando_chiede_piu_un_id_a_mano():
     assert {
         ("rimuovi_cittadino", "cittadino"),
         ("rimuovi_attivita", "attivita"),
-        ("modera_attivita", "attivita"),
         ("aggiungi_admin", "utente"),
         ("rimuovi_admin", "utente"),
     } <= a_scelte

@@ -14,8 +14,13 @@ def _indici(conn, tabella):
     return {r["name"] for r in conn.execute(f"PRAGMA index_list('{tabella}')")}
 
 
-def test_init_db_crea_le_tre_tabelle(conn):
-    assert {"cittadini", "richieste", "attivita"} <= _tabelle(conn)
+def test_init_db_crea_le_quattro_tabelle(conn):
+    assert {
+        "cittadini",
+        "richieste",
+        "attivita",
+        "proposte_attivita",
+    } <= _tabelle(conn)
 
 
 def test_init_db_e_idempotente(db_path):
@@ -32,6 +37,17 @@ def test_le_attivita_hanno_i_loro_indici(conn):
     } <= _indici(conn, "attivita")
 
 
+def test_le_proposte_hanno_i_loro_indici(conn):
+    assert {"idx_proposte_owner", "idx_proposte_nome_owner"} <= _indici(
+        conn, "proposte_attivita"
+    )
+
+
+def test_nessuna_foreign_key_sulle_proposte(conn):
+    """Stessa ragione di «attivita»: vedi il commento allo schema in db.py."""
+    assert conn.execute("PRAGMA foreign_key_list('proposte_attivita')").fetchall() == []
+
+
 def test_migrazione_di_un_registro_preesistente(tmp_path):
     """Un registro.db con le sole tabelle vecchie acquisisce «attivita»."""
     percorso = tmp_path / "vecchio.db"
@@ -46,7 +62,7 @@ def test_migrazione_di_un_registro_preesistente(tmp_path):
 
     conn = get_connection(percorso)
     try:
-        assert "attivita" in _tabelle(conn)
+        assert {"attivita", "proposte_attivita"} <= _tabelle(conn)
     finally:
         conn.close()
 

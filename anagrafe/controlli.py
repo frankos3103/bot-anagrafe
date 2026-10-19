@@ -135,9 +135,11 @@ def verifica_nome_attivita_libero(
 ) -> str:
     """Restituisce il nome se il proprietario non ne ha già una così chiamata.
 
-    Il vincolo è per proprietario e solo fra le attività attive: due cittadini
-    diversi possono avere attività omonime, e un nome torna libero dopo una
-    rimozione d'ufficio.
+    Il vincolo è per proprietario: due cittadini diversi possono avere attività
+    omonime. Si guarda sia fra le attività iscritte e attive sia fra le proposte
+    ancora in attesa, altrimenti si potrebbe proporre due volte la stessa cosa
+    e averla approvata due volte. Un nome torna libero dopo una rimozione o un
+    rifiuto.
     """
     esistente = repository.attivita_per_nome(conn, owner_id, nome_attivita)
     if esistente is not None:
@@ -146,6 +148,14 @@ def verifica_nome_attivita_libero(
             f"«{esistente['nome_attivita']}» (#{esistente['attivita_id']}). "
             "Scegli un nome diverso."
         )
+
+    proposta = repository.proposta_per_nome(conn, owner_id, nome_attivita)
+    if proposta is not None:
+        raise ErroreValidazione(
+            f"Hai già proposto un'attività con il nome "
+            f"«{proposta['nome_attivita']}», ed è in attesa di approvazione."
+        )
+
     return nome_attivita
 
 

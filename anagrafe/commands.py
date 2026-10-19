@@ -282,7 +282,7 @@ COMMANDS: tuple[Comando, ...] = (
         sezione="attivita",
         ruolo=Role.PUBBLICO,
         emoji="🏪",
-        descrizione="Iscrive una tua attività al Registro Pubblico delle Attività",
+        descrizione="Propone una tua attività per il Registro Pubblico",
         uso="/registra_attivita",
         etichetta_menu="Registra",
         campi=(
@@ -440,26 +440,6 @@ COMMANDS: tuple[Comando, ...] = (
         esempio="invia il file .csv con didascalia /importa_attivita",
         etichetta_menu="Importa CSV",
         attende_allegato=True,
-    ),
-    Comando(
-        nome="modera_attivita",
-        sezione="attivita",
-        ruolo=Role.ADMIN,
-        emoji="🏛",
-        descrizione="Rimanda la scheda di un'attività con i pulsanti di moderazione",
-        uso="/modera_attivita <ID_attività>",
-        esempio="/modera_attivita 7",
-        etichetta_menu="Modera",
-        campi=(
-            Campo(
-                "attivita",
-                "Attività",
-                "Quale attività vuoi moderare?",
-                valida_attivita_id,
-                scelte="attivita_moderabili",
-                messaggio_vuoto="Nessuna attività attiva nel Registro.",
-            ),
-        ),
     ),
     Comando(
         nome="elenco_admin",

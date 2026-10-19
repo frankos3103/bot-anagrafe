@@ -93,6 +93,26 @@ CREATE TABLE IF NOT EXISTS attivita (
 """
 
 
+# Le proposte in attesa di approvazione. Una riga esiste *solo* mentre la
+# proposta è pendente: approvarla la sposta in «attivita», rifiutarla la
+# cancella. Non c'è una colonna di stato perché non ci sono stati: questo
+# rende la DELETE stessa il lock contro due amministratori che decidono
+# insieme (vedi repository.approva_proposta).
+SCHEMA_PROPOSTE_ATTIVITA = """
+CREATE TABLE IF NOT EXISTS proposte_attivita (
+    proposta_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id       INTEGER NOT NULL,
+    owner_username TEXT,
+    nome_attivita  TEXT NOT NULL,
+    tipologia      TEXT NOT NULL,
+    descrizione    TEXT NOT NULL,
+    contatto_link  TEXT,
+    created_at     TEXT NOT NULL,
+    notifiche      TEXT
+)
+"""
+
+
 def init_db(db_path: Path | str) -> None:
     """Crea le tabelle se non esistono e prova ad aggiungere gli indici unici.
 
@@ -103,6 +123,7 @@ def init_db(db_path: Path | str) -> None:
         conn.execute(SCHEMA_CITTADINI)
         conn.execute(SCHEMA_RICHIESTE)
         conn.execute(SCHEMA_ATTIVITA)
+        conn.execute(SCHEMA_PROPOSTE_ATTIVITA)
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_richieste_stato "
             "ON richieste(telegram_id, stato)"
@@ -142,4 +163,22 @@ def init_db(db_path: Path | str) -> None:
                 "Impossibile creare l'indice unico su "
                 "attivita(owner_id, nome_attivita): nel registro esistono "
                 "attività attive con lo stesso nome e lo stesso proprietario."
+            )
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_proposte_owner "
+            "ON proposte_attivita(owner_id)"
+        )
+        try:
+            # Tutte le proposte sono pendenti, quindi qui l'indice unico non ha
+            # bisogno di essere parziale come quello su «attivita».
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_proposte_nome_owner "
+                "ON proposte_attivita(owner_id, nome_attivita COLLATE NOCASE)"
+            )
+        except sqlite3.IntegrityError:
+            logger.warning(
+                "Impossibile creare l'indice unico su "
+                "proposte_attivita(owner_id, nome_attivita): esistono proposte "
+                "con lo stesso nome e lo stesso proprietario."
             )

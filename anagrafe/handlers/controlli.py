@@ -92,14 +92,6 @@ async def _verifica_attivita_rimovibile(
     return attivita_id
 
 
-async def _verifica_attivita_moderabile(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, attivita_id: int
-) -> int:
-    with db(context) as conn:
-        controlli.verifica_attivita_moderabile(conn, attivita_id)
-    return attivita_id
-
-
 PRECONDIZIONI: dict[str, Precondizione] = {
     "richiedi_cittadinanza": _pre_richiedi,
     "registra_attivita": _pre_attivita,
@@ -111,6 +103,5 @@ VERIFICHE_CAMPO: dict[tuple[str, str], Verifica] = {
     ("aggiungi_admin", "utente"): _verifica_aggiungi_admin,
     ("rimuovi_admin", "utente"): _verifica_rimuovi_admin,
     ("registra_attivita", "nome_attivita"): _verifica_nome_attivita,
-    ("modera_attivita", "attivita"): _verifica_attivita_moderabile,
     ("rimuovi_attivita", "attivita"): _verifica_attivita_rimovibile,
 }

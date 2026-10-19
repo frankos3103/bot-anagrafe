@@ -102,25 +102,8 @@ async def attivita_rimovibili(
     ]
 
 
-async def attivita_moderabili(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> list[Opzione]:
-    """Tutte le attività attive: la moderazione è un atto d'ufficio."""
-    with db(context) as conn:
-        righe = repository.list_attivita_attive(conn)
-    return [
-        Opzione(
-            str(r["attivita_id"]),
-            _etichetta_attivita(r),
-            emoji_attivita(r["tipologia"]),
-        )
-        for r in righe
-    ]
-
-
 FORNITORI: dict[str, Fornitore] = {
     "cittadini": cittadini,
     "amministratori": amministratori,
     "attivita_rimovibili": attivita_rimovibili,
-    "attivita_moderabili": attivita_moderabili,
 }

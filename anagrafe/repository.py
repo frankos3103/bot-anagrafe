@@ -16,17 +16,19 @@ STATO_ACCETTATA = "accettata"
 STATO_RIFIUTATA = "rifiutata"
 
 ATTIVITA_ATTIVA = "ATTIVA"
-# Ritiro volontario del proprietario, distinto dai due atti d'ufficio del
-# Ministero: lo stato dice in quale veste l'attività è stata chiusa.
+# Ritiro volontario del proprietario, distinto dalla rimozione d'ufficio:
+# lo stato dice in quale veste l'attività è stata chiusa.
 ATTIVITA_CHIUSA = "CHIUSA"
 ATTIVITA_RIMOSSA = "RIMOSSA"
-ATTIVITA_RIFIUTATA = "RIFIUTATA"
 
 ETICHETTE_STATO_ATTIVITA = {
     ATTIVITA_ATTIVA: "attiva",
     ATTIVITA_CHIUSA: "chiusa",
     ATTIVITA_RIMOSSA: "rimossa",
-    ATTIVITA_RIFIUTATA: "rifiutata",
+    # Nessuna scrittura produce più questo stato: un rifiuto cancella la
+    # proposta e nel registro non entra nulla. L'etichetta resta per i registri
+    # creati prima del passaggio all'approvazione preventiva.
+    "RIFIUTATA": "rifiutata",
 }
 
 
@@ -540,3 +542,159 @@ def chiudi_attivita(
     )
     conn.commit()
     return cursore.rowcount == 1
+
+
+# ----------------------------------------------------------------------
+# Proposte di attività in attesa di approvazione
+# ----------------------------------------------------------------------
+
+def crea_proposta(
+    conn: sqlite3.Connection,
+    owner_id: int,
+    owner_username: str | None,
+    nome_attivita: str,
+    tipologia: str,
+    descrizione: str,
+    contatto_link: str | None = None,
+    created_at: str | None = None,
+) -> int:
+    """Registra una proposta in attesa. Nel registro non entra ancora nulla."""
+    cursore = conn.execute(
+        """
+        INSERT INTO proposte_attivita (
+            owner_id, owner_username, nome_attivita, tipologia, descrizione,
+            contatto_link, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            owner_id,
+            normalizza_username(owner_username),
+            nome_attivita,
+            tipologia,
+            descrizione,
+            contatto_link,
+            created_at or oggi(),
+        ),
+    )
+    conn.commit()
+    return cursore.lastrowid
+
+
+def get_proposta(conn: sqlite3.Connection, proposta_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM proposte_attivita WHERE proposta_id = ?", (proposta_id,)
+    ).fetchone()
+
+
+def list_proposte(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Le proposte in attesa, dalla più vecchia: si esaminano in ordine."""
+    return conn.execute(
+        "SELECT * FROM proposte_attivita ORDER BY proposta_id ASC"
+    ).fetchall()
+
+
+def list_proposte_per_owner(
+    conn: sqlite3.Connection, owner_id: int
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM proposte_attivita WHERE owner_id = ? ORDER BY proposta_id ASC",
+        (owner_id,),
+    ).fetchall()
+
+
+def count_proposte(conn: sqlite3.Connection) -> int:
+    return conn.execute("SELECT COUNT(*) AS n FROM proposte_attivita").fetchone()["n"]
+
+
+def proposta_per_nome(
+    conn: sqlite3.Connection, owner_id: int, nome_attivita: str
+) -> sqlite3.Row | None:
+    """La proposta pendente di quel proprietario con quel nome.
+
+    Il confronto ignora maiuscole e accenti, come per le attività iscritte.
+    """
+    cercato = normalizza_testo(nome_attivita)
+    for riga in list_proposte_per_owner(conn, owner_id):
+        if normalizza_testo(riga["nome_attivita"]) == cercato:
+            return riga
+    return None
+
+
+def set_proposta_notifiche(
+    conn: sqlite3.Connection, proposta_id: int, notifiche: list[list[int]]
+) -> None:
+    conn.execute(
+        "UPDATE proposte_attivita SET notifiche = ? WHERE proposta_id = ?",
+        (json.dumps(notifiche), proposta_id),
+    )
+    conn.commit()
+
+
+def rifiuta_proposta(
+    conn: sqlite3.Connection, proposta_id: int
+) -> sqlite3.Row | None:
+    """Cancella la proposta e restituisce com'era, o None se non c'è più.
+
+    Del rifiuto non resta traccia nel database: nel registro non è mai entrato
+    nulla. Il None dice a chi chiama che un altro amministratore ha già deciso.
+    """
+    riga = get_proposta(conn, proposta_id)
+    if riga is None:
+        return None
+    cursore = conn.execute(
+        "DELETE FROM proposte_attivita WHERE proposta_id = ?", (proposta_id,)
+    )
+    conn.commit()
+    return riga if cursore.rowcount == 1 else None
+
+
+def approva_proposta(
+    conn: sqlite3.Connection, proposta_id: int, admin_id: int, admin_username: str | None
+) -> tuple[int, sqlite3.Row] | None:
+    """Sposta una proposta nel registro: la toglie e iscrive l'attività.
+
+    Restituisce (attivita_id, proposta) oppure None se la proposta non c'è più,
+    perché un altro amministratore l'ha già decisa: è la DELETE a fare da lock,
+    e il suo rowcount a dire chi ha vinto.
+
+    Le due scritture stanno in una sola transazione, e l'ordine conta: la DELETE
+    viene prima perché è lei a decidere, e non fa commit da sé. Se l'iscrizione
+    fallisce (per esempio un nome diventato nel frattempo occupato) l'eccezione
+    risale ad apri_db, che annulla tutto e lascia la proposta dov'era.
+    """
+    riga = get_proposta(conn, proposta_id)
+    if riga is None:
+        return None
+
+    cursore = conn.execute(
+        "DELETE FROM proposte_attivita WHERE proposta_id = ?", (proposta_id,)
+    )
+    if cursore.rowcount != 1:
+        return None
+
+    cursore = conn.execute(
+        """
+        INSERT INTO attivita (
+            owner_id, owner_username, nome_attivita, tipologia, descrizione,
+            contatto_link, stato, created_at, admin_id, admin_username,
+            data_moderazione
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            riga["owner_id"],
+            riga["owner_username"],
+            riga["nome_attivita"],
+            riga["tipologia"],
+            riga["descrizione"],
+            riga["contatto_link"],
+            ATTIVITA_ATTIVA,
+            oggi(),
+            admin_id,
+            normalizza_username(admin_username),
+            oggi(),
+        ),
+    )
+    conn.commit()
+    return cursore.lastrowid, riga

@@ -133,13 +133,14 @@ def test_le_attivita_chiuse_non_si_possono_scegliere(
     assert _chiedi(
         fornitori_scelte.attivita_rimovibili, db_path, roles, telegram_id=12345
     ) == []
-    assert _chiedi(fornitori_scelte.attivita_moderabili, db_path, roles) == []
 
 
-def test_la_moderazione_vede_tutte_le_attive(conn, db_path, roles, cittadino, attivita):
-    repository.create_attivita(conn, 777, None, "Altrui", "privata", "Non mia.")
-    voci = _chiedi(fornitori_scelte.attivita_moderabili, db_path, roles)
-    assert len(voci) == 2
+def test_le_proposte_non_si_possono_rimuovere(conn, db_path, roles, cittadino):
+    """Non sono nel registro: si approvano o si rifiutano, non si rimuovono."""
+    repository.crea_proposta(conn, 12345, "mariorossi", "Proposta", "privata", "Nuova.")
+    assert _chiedi(
+        fornitori_scelte.attivita_rimovibili, db_path, roles, telegram_id=12345
+    ) == []
 
 
 # ----------------------------------------------------------------------
