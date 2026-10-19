@@ -18,11 +18,15 @@ logger = logging.getLogger(__name__)
 # Chiave in user_data: il menu la imposta per dire «il prossimo file è un import».
 ATTESA_CSV = "attesa_csv"
 
+# Il nome del comando sta qui una volta sola: lo citano le istruzioni, il
+# riconoscimento della didascalia e il messaggio d'uso.
+COMANDO = "importa_cittadini"
+
 DIMENSIONE_MASSIMA = 2 * 1024 * 1024  # 2 MB
 
 ISTRUZIONI = (
     "📥 Import cittadini da CSV\n\n"
-    "Invia un file .csv allegandolo a questa chat con didascalia /importa.\n\n"
+    f"Invia un file .csv allegandolo a questa chat con didascalia /{COMANDO}.\n\n"
     "Colonne attese (l'intestazione può usare nomi equivalenti):\n"
     "  Telegram ID, Username, Nome, Cognome\n\n"
     "Esempio:\n"
@@ -35,8 +39,8 @@ ISTRUZIONI = (
 
 
 @richiede(Role.ADMIN)
-async def cmd_importa(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/importa senza allegato: spiega come si fa e si mette in attesa del file."""
+async def cmd_importa_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/importa_cittadini senza allegato: spiega come si fa e si mette in attesa del file."""
     context.user_data[ATTESA_CSV] = True
     await rispondi(update, ISTRUZIONI)
 
@@ -44,11 +48,11 @@ async def cmd_importa(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 def _e_un_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Questo documento è destinato a noi?
 
-    Lo è se la didascalia è /importa oppure se l'utente ha appena chiesto di
-    importare (da /importa o dalla pulsantiera).
+    Lo è se la didascalia è /importa_cittadini oppure se l'utente ha appena chiesto di
+    importare (da /importa_cittadini o dalla pulsantiera).
     """
     didascalia = (update.effective_message.caption or "").strip().lower()
-    if didascalia.startswith("/importa"):
+    if didascalia.startswith(f"/{COMANDO}"):
         return True
     # Senza utente (es. post di un canale) user_data è None.
     return bool(context.user_data and context.user_data.get(ATTESA_CSV))
@@ -72,7 +76,7 @@ async def on_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     nome_file = (documento.file_name or "").lower()
 
     if not nome_file.endswith(".csv"):
-        comando = trova_comando("importa")
+        comando = trova_comando(COMANDO)
         await rispondi(
             update,
             "⚠️ Serve un file con estensione .csv "

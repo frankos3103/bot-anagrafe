@@ -135,7 +135,7 @@ def test_solo_un_cittadino_puo_iscrivere_unattivita(conn, cittadino):
 
 def test_un_estraneo_viene_rimandato_a_richiedi(conn):
     """È il requisito di cittadinanza del D.M. n.3 del 13/10/2026."""
-    with pytest.raises(ErroreValidazione, match="/richiedi"):
+    with pytest.raises(ErroreValidazione, match="/richiedi_cittadinanza"):
         controlli.precondizione_attivita(conn, 99999)
 
 
@@ -174,3 +174,53 @@ def test_attivita_gia_moderata(conn, cittadino, attivita):
     repository.chiudi_attivita(conn, attivita, repository.ATTIVITA_RIMOSSA, 100, "capo")
     with pytest.raises(ErroreValidazione, match="rimossa"):
         controlli.verifica_attivita_moderabile(conn, attivita)
+
+
+# ----------------------------------------------------------------------
+# Rimozione di un'attività: il permesso dipende dalla proprietà
+# ----------------------------------------------------------------------
+
+def test_il_proprietario_puo_rimuovere_la_sua(conn, cittadino, attivita):
+    riga = controlli.verifica_attivita_rimovibile(conn, attivita, 12345, False)
+    assert riga["attivita_id"] == attivita
+
+
+def test_un_estraneo_non_puo_rimuovere_laltrui(conn, cittadino, attivita):
+    with pytest.raises(ErroreValidazione):
+        controlli.verifica_attivita_rimovibile(conn, attivita, 99999, False)
+
+
+def test_il_rifiuto_non_rivela_nulla_dellattivita(conn, cittadino, attivita):
+    """Chi indovina un ID non deve scoprire né che esiste né di chi è."""
+    with pytest.raises(ErroreValidazione) as esistente:
+        controlli.verifica_attivita_rimovibile(conn, attivita, 99999, False)
+    with pytest.raises(ErroreValidazione) as inventata:
+        controlli.verifica_attivita_rimovibile(conn, 999, 99999, False)
+
+    assert "Pizzeria" not in str(esistente.value)
+    # Lo stesso messaggio nei due casi, a meno dell'ID.
+    assert str(esistente.value).replace(str(attivita), "X") == str(
+        inventata.value
+    ).replace("999", "X")
+
+
+def test_un_admin_puo_rimuovere_qualunque_attivita(conn, cittadino, attivita):
+    riga = controlli.verifica_attivita_rimovibile(conn, attivita, 99999, True)
+    assert riga["attivita_id"] == attivita
+
+
+def test_non_si_rimuove_unattivita_gia_chiusa(conn, cittadino, attivita):
+    repository.chiudi_attivita(conn, attivita, repository.ATTIVITA_CHIUSA, 12345, None)
+    with pytest.raises(ErroreValidazione, match="chiusa"):
+        controlli.verifica_attivita_rimovibile(conn, attivita, 12345, False)
+
+
+def test_unattivita_inesistente_non_si_rimuove(conn, cittadino):
+    with pytest.raises(ErroreValidazione, match="#999"):
+        controlli.verifica_attivita_rimovibile(conn, 999, 12345, True)
+
+
+def test_il_nome_di_unattivita_ritirata_torna_libero(conn, cittadino, attivita):
+    """È il presupposto del «si rimuove e si reimmette»."""
+    repository.chiudi_attivita(conn, attivita, repository.ATTIVITA_CHIUSA, 12345, None)
+    assert controlli.verifica_nome_attivita_libero(conn, 12345, "Pizzeria Da Mario")

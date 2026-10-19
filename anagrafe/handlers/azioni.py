@@ -2,7 +2,7 @@
 
 Ogni azione riceve un dizionario di valori già validati e si occupa di
 eseguirla, rispondere in chat e scrivere sul canale di log. Sono condivise fra
-i comandi testuali (/inserisci ...) e il wizard di /menu: è così che la
+i comandi testuali (/inserisci_cittadino ...) e il wizard di /menu: è così che la
 pulsantiera può fare esattamente tutto quello che si fa da riga di comando.
 """
 
@@ -27,9 +27,10 @@ from ..logbook import fmt_username, fmt_utente, send_log
 from ..roles import ETICHETTE_RUOLO, Role
 from ..validators import ErroreValidazione
 from .attivita import (
-    azione_attivita,
     azione_elenco_attivita,
     azione_modera_attivita,
+    azione_registra_attivita,
+    azione_rimuovi_attivita,
 )
 from .common import db, get_roles, richiede, rispondi, ruolo_utente
 from .notifiche import invia_notifiche_admin
@@ -47,7 +48,7 @@ async def azione_help(update: Update, context: ContextTypes.DEFAULT_TYPE, valori
     await rispondi(update, render_help(ruolo_utente(update, context)))
 
 
-async def azione_elenco(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+async def azione_elenco_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     with db(context) as conn:
         righe = repository.list_citizens(conn, ordine="nome")
 
@@ -61,7 +62,7 @@ async def azione_elenco(update: Update, context: ContextTypes.DEFAULT_TYPE, valo
         await rispondi(update, blocco, parse_mode="MarkdownV2")
 
 
-async def azione_esporta(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+async def azione_esporta_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     with db(context) as conn:
         righe = repository.list_citizens(conn, ordine="citizen_id")
 
@@ -77,7 +78,7 @@ async def azione_esporta(update: Update, context: ContextTypes.DEFAULT_TYPE, val
     )
 
 
-async def azione_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+async def azione_cerca_cittadino(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     query = valori["query"]
     with db(context) as conn:
         righe = repository.search_citizens(conn, query)
@@ -100,7 +101,7 @@ async def azione_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE, valor
 # Richiesta di cittadinanza
 # ----------------------------------------------------------------------
 
-async def azione_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+async def azione_richiedi_cittadinanza(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     utente = update.effective_user
     nome, cognome = valori["nome"], valori["cognome"]
 
@@ -166,7 +167,7 @@ async def azione_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE, va
 # ----------------------------------------------------------------------
 
 @richiede(Role.ADMIN)
-async def azione_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+async def azione_inserisci_cittadino(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     telegram_id = valori["telegram_id"]
     username = valori.get("username")
     nome, cognome = valori["nome"], valori["cognome"]
@@ -200,7 +201,7 @@ async def azione_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE, v
 
 
 @richiede(Role.ADMIN)
-async def azione_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+async def azione_rimuovi_cittadino(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     with db(context) as conn:
         try:
             citizen_id = controlli.risolvi_cittadino(conn, valori["cittadino"])["citizen_id"]
@@ -230,7 +231,7 @@ async def azione_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE, val
 
 
 @richiede(Role.ADMIN)
-async def azione_tagall(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
+async def azione_tagga_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     with db(context) as conn:
         righe = repository.list_citizens(conn, ordine="nome")
 
@@ -352,17 +353,18 @@ async def azione_rimuovi_admin(update: Update, context: ContextTypes.DEFAULT_TYP
 # conferma, ed è la stessa funzione che invoca il comando testuale.
 AZIONI = {
     "help": azione_help,
-    "elenco": azione_elenco,
-    "esporta": azione_esporta,
-    "cerca": azione_cerca,
-    "richiedi": azione_richiedi,
-    "inserisci": azione_inserisci,
-    "rimuovi": azione_rimuovi,
-    "tagall": azione_tagall,
-    # Il Registro delle Attività vive in handlers/attivita.py: qui entra solo
+    "elenco_cittadini": azione_elenco_cittadini,
+    "esporta_cittadini": azione_esporta_cittadini,
+    "cerca_cittadino": azione_cerca_cittadino,
+    "richiedi_cittadinanza": azione_richiedi_cittadinanza,
+    "inserisci_cittadino": azione_inserisci_cittadino,
+    "rimuovi_cittadino": azione_rimuovi_cittadino,
+    "tagga_cittadini": azione_tagga_cittadini,
+    # Il Registro delle Attività vive in handlers/registra_attivita.py: qui entra solo
     # nel dict, che è quello che il wizard di /menu esegue alla conferma.
-    "attivita": azione_attivita,
+    "registra_attivita": azione_registra_attivita,
     "elenco_attivita": azione_elenco_attivita,
+    "rimuovi_attivita": azione_rimuovi_attivita,
     "modera_attivita": azione_modera_attivita,
     "elenco_admin": azione_elenco_admin,
     "aggiungi_admin": azione_aggiungi_admin,

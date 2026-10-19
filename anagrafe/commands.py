@@ -26,6 +26,25 @@ from .validators import (
 
 
 @dataclass(frozen=True)
+class Sezione:
+    """Un'area della pulsantiera: raggruppa i comandi per argomento.
+
+    La sezione dice di che cosa si parla, il ruolo dice chi può agire: sono
+    ortogonali, percio' i comandi riservati agli amministratori che riguardano
+    i cittadini stanno in «Cittadinanza», non in «Amministrazione».
+    """
+
+    chiave: str
+    etichetta: str
+    emoji: str = ""
+
+    @property
+    def label(self) -> str:
+        """Testo del pulsante nella vista principale."""
+        return f"{self.emoji} {self.etichetta}".strip()
+
+
+@dataclass(frozen=True)
 class Opzione:
     """Una scelta a pulsante per un campo del wizard.
 
@@ -55,10 +74,22 @@ class Campo:
     opzionale: bool = False
     opzioni: tuple[Opzione, ...] = ()
     per_riga: int = 1
+    # Chiave di un fornitore in handlers/scelte.py: le opzioni non sono fisse
+    # ma lette dal registro quando il wizard arriva a questo campo, perché
+    # dipendono dai dati e da chi sta chiedendo.
+    scelte: str = ""
+    # Cosa rispondere quando il fornitore non trova nulla da scegliere.
+    messaggio_vuoto: str = ""
 
     @property
     def a_pulsanti(self) -> bool:
+        """Il campo offre scelte fisse, dichiarate qui nel registro."""
         return bool(self.opzioni)
+
+    @property
+    def a_scelte(self) -> bool:
+        """Il campo offre scelte lette dal registro al momento della domanda."""
+        return bool(self.scelte)
 
     def mostra(self, valore: Any) -> str:
         """Il valore come va mostrato nel riepilogo: l'etichetta, non la chiave."""
@@ -78,6 +109,9 @@ class Comando:
     esempio: str | None = None
     campi: tuple[Campo, ...] = ()
     etichetta_menu: str | None = None
+    # L'area della pulsantiera in cui compare il pulsante. Vuota per i comandi
+    # che non stanno nella pulsantiera (start, help, menu).
+    sezione: str = ""
     nel_menu: bool = True
     nell_help: bool = True
     nel_menu_telegram: bool = False
@@ -85,6 +119,9 @@ class Comando:
     # pulsantiera: va negli entry_points della ConversationHandler, non in
     # handlers.COMANDI. Vedi build_menu_handler().
     wizard_diretto: bool = False
+    # Il comando si completa con un allegato invece che col wizard: vedi
+    # avvia_wizard(). Dichiararlo qui evita di cablarne il nome negli handler.
+    attende_allegato: bool = False
 
     @property
     def label(self) -> str:
@@ -94,6 +131,15 @@ class Comando:
     @property
     def richiede_input(self) -> bool:
         return bool(self.campi)
+
+
+SEZIONI: tuple[Sezione, ...] = (
+    Sezione("cittadini", "Cittadinanza", "👥"),
+    Sezione("attivita", "Attività", "🏪"),
+    Sezione("amministrazione", "Amministrazione", "👮"),
+)
+
+SEZIONI_PER_CHIAVE: dict[str, Sezione] = {s.chiave: s for s in SEZIONI}
 
 
 # Le tipologie previste dal Decreto Ministeriale n.3 del 13/10/2026. Unica
@@ -153,30 +199,33 @@ COMMANDS: tuple[Comando, ...] = (
         nel_menu_telegram=True,
     ),
     Comando(
-        nome="elenco",
+        nome="elenco_cittadini",
+        sezione="cittadini",
         ruolo=Role.PUBBLICO,
         emoji="👥",
         descrizione="Elenco completo dei cittadini",
-        uso="/elenco",
+        uso="/elenco_cittadini",
         etichetta_menu="Elenco",
         nel_menu_telegram=True,
     ),
     Comando(
-        nome="esporta",
+        nome="esporta_cittadini",
+        sezione="cittadini",
         ruolo=Role.PUBBLICO,
         emoji="📤",
         descrizione="Esporta il registro come file Markdown",
-        uso="/esporta",
+        uso="/esporta_cittadini",
         etichetta_menu="Esporta",
         nel_menu_telegram=True,
     ),
     Comando(
-        nome="cerca",
+        nome="cerca_cittadino",
+        sezione="cittadini",
         ruolo=Role.PUBBLICO,
         emoji="🔍",
         descrizione="Cerca per nome e/o cognome, @username, #ID o ID Telegram",
-        uso="/cerca <testo>",
-        esempio="/cerca Mario Rossi",
+        uso="/cerca_cittadino <testo>",
+        esempio="/cerca_cittadino Mario Rossi",
         etichetta_menu="Cerca",
         campi=(
             Campo(
@@ -189,23 +238,25 @@ COMMANDS: tuple[Comando, ...] = (
         nel_menu_telegram=True,
     ),
     Comando(
-        nome="richiedi",
+        nome="richiedi_cittadinanza",
+        sezione="cittadini",
         ruolo=Role.PUBBLICO,
         emoji="📝",
         descrizione="Invia una richiesta di cittadinanza",
-        uso="/richiedi <nome>, <cognome>",
-        esempio="/richiedi Mario, Rossi",
+        uso="/richiedi_cittadinanza <nome>, <cognome>",
+        esempio="/richiedi_cittadinanza Mario, Rossi",
         etichetta_menu="Richiedi",
         campi=(_CAMPO_NOME, _CAMPO_COGNOME),
         nel_menu_telegram=True,
     ),
     Comando(
-        nome="attivita",
+        nome="registra_attivita",
+        sezione="attivita",
         ruolo=Role.PUBBLICO,
         emoji="🏪",
         descrizione="Iscrive una tua attività al Registro Pubblico delle Attività",
-        uso="/attivita",
-        etichetta_menu="Registra attività",
+        uso="/registra_attivita",
+        etichetta_menu="Registra",
         campi=(
             Campo(
                 "nome_attivita",
@@ -240,20 +291,45 @@ COMMANDS: tuple[Comando, ...] = (
     ),
     Comando(
         nome="elenco_attivita",
+        sezione="attivita",
         ruolo=Role.PUBBLICO,
         emoji="📋",
         descrizione="Elenco delle attività iscritte al Registro Pubblico",
         uso="/elenco_attivita",
-        etichetta_menu="Elenco attività",
+        etichetta_menu="Elenco",
         nel_menu_telegram=True,
     ),
     Comando(
-        nome="inserisci",
+        nome="rimuovi_attivita",
+        sezione="attivita",
+        # Pubblico perché il proprietario è un cittadino: qui il filtro non è il
+        # ruolo ma la proprietà, verificata in controlli.verifica_attivita_rimovibile.
+        ruolo=Role.PUBBLICO,
+        emoji="🗑",
+        descrizione="Ritira una tua attività dal Registro Pubblico",
+        uso="/rimuovi_attivita <ID_attività>",
+        esempio="/rimuovi_attivita 7",
+        etichetta_menu="Rimuovi",
+        campi=(
+            Campo(
+                "attivita",
+                "Attività",
+                "Quale attività vuoi rimuovere?",
+                valida_attivita_id,
+                scelte="attivita_rimovibili",
+                messaggio_vuoto="Non hai attività attive da rimuovere.",
+            ),
+        ),
+        nel_menu_telegram=True,
+    ),
+    Comando(
+        nome="inserisci_cittadino",
+        sezione="cittadini",
         ruolo=Role.ADMIN,
         emoji="➕",
         descrizione="Inserisce un nuovo cittadino nel registro",
-        uso="/inserisci <ID_telegram>, <username>, <nome>, <cognome>",
-        esempio="/inserisci 123456789, @mariorossi, Mario, Rossi",
+        uso="/inserisci_cittadino <ID_telegram>, <username>, <nome>, <cognome>",
+        esempio="/inserisci_cittadino 123456789, @mariorossi, Mario, Rossi",
         etichetta_menu="Inserisci",
         campi=(
             Campo(
@@ -274,98 +350,111 @@ COMMANDS: tuple[Comando, ...] = (
         ),
     ),
     Comando(
-        nome="rimuovi",
+        nome="rimuovi_cittadino",
+        sezione="cittadini",
         ruolo=Role.ADMIN,
         emoji="❌",
         descrizione="Rimuove un cittadino dal registro",
-        uso="/rimuovi <ID_cittadino | ID_telegram | @username>",
-        esempio="/rimuovi 12 oppure /rimuovi @mariorossi",
+        uso="/rimuovi_cittadino <ID_cittadino | ID_telegram | @username>",
+        esempio="/rimuovi_cittadino 12 oppure /rimuovi_cittadino @mariorossi",
         etichetta_menu="Rimuovi",
         campi=(
             Campo(
                 "cittadino",
                 "Cittadino",
-                "Quale cittadino vuoi rimuovere? (ID cittadino, ID Telegram "
-                "oppure @username)",
+                "Quale cittadino vuoi rimuovere?",
                 valida_riferimento_cittadino,
+                scelte="cittadini",
+                messaggio_vuoto="Il registro dei cittadini è vuoto.",
             ),
         ),
     ),
     Comando(
-        nome="tagall",
+        nome="tagga_cittadini",
+        sezione="cittadini",
         ruolo=Role.ADMIN,
         emoji="📣",
         descrizione="Tagga tutti i cittadini con uno username",
-        uso="/tagall",
+        uso="/tagga_cittadini",
         etichetta_menu="Tagga tutti",
     ),
     Comando(
-        nome="importa",
+        nome="importa_cittadini",
+        sezione="cittadini",
         ruolo=Role.ADMIN,
         emoji="📥",
+        attende_allegato=True,
         descrizione="Importa più cittadini da un file CSV",
-        uso="/importa (allegando un file .csv)",
-        esempio="invia il file .csv con didascalia /importa",
+        uso="/importa_cittadini (allegando un file .csv)",
+        esempio="invia il file .csv con didascalia /importa_cittadini",
         etichetta_menu="Importa CSV",
     ),
     Comando(
         nome="modera_attivita",
+        sezione="attivita",
         ruolo=Role.ADMIN,
         emoji="🏛",
         descrizione="Rimanda la scheda di un'attività con i pulsanti di moderazione",
         uso="/modera_attivita <ID_attività>",
         esempio="/modera_attivita 7",
-        etichetta_menu="Modera attività",
+        etichetta_menu="Modera",
         campi=(
             Campo(
                 "attivita",
                 "Attività",
-                "Quale attività vuoi moderare? (ID numerico, es. 7)",
+                "Quale attività vuoi moderare?",
                 valida_attivita_id,
+                scelte="attivita_moderabili",
+                messaggio_vuoto="Nessuna attività attiva nel Registro.",
             ),
         ),
     ),
     Comando(
         nome="elenco_admin",
+        sezione="amministrazione",
         ruolo=Role.ROOT,
         emoji="👮",
         descrizione="Mostra gli amministratori configurati",
         uso="/elenco_admin",
-        etichetta_menu="Elenco admin",
+        etichetta_menu="Elenco",
     ),
     Comando(
         nome="aggiungi_admin",
+        sezione="amministrazione",
         ruolo=Role.ROOT,
         emoji="🛡",
         descrizione="Aggiunge un amministratore",
         uso="/aggiungi_admin <ID_telegram | @username>",
         esempio="/aggiungi_admin 123456789 oppure /aggiungi_admin @mariorossi",
-        etichetta_menu="Aggiungi admin",
+        etichetta_menu="Aggiungi",
         campi=(
             Campo(
                 "utente",
                 "Utente",
-                "Chi è il nuovo amministratore? (ID Telegram, oppure @username "
-                "se è un cittadino)",
+                "Chi è il nuovo amministratore?",
                 valida_riferimento_utente,
+                scelte="cittadini",
+                messaggio_vuoto="Il registro dei cittadini è vuoto.",
             ),
         ),
     ),
     Comando(
         nome="rimuovi_admin",
+        sezione="amministrazione",
         ruolo=Role.ROOT,
         emoji="🚫",
         descrizione="Rimuove un amministratore",
         uso="/rimuovi_admin <ID_telegram | @username>",
         esempio="/rimuovi_admin 123456789 oppure /rimuovi_admin @mariorossi",
-        etichetta_menu="Rimuovi admin",
+        etichetta_menu="Rimuovi",
         campi=(
             Campo(
                 "utente",
                 "Utente",
-                "Quale amministratore vuoi rimuovere? (ID Telegram, oppure "
-                "@username se è un cittadino)",
+                "Quale amministratore vuoi rimuovere?",
                 valida_riferimento_utente,
+                scelte="amministratori",
+                messaggio_vuoto="Non ci sono amministratori da rimuovere.",
             ),
         ),
     ),
@@ -379,12 +468,36 @@ def trova_comando(nome: str) -> Comando | None:
     return PER_NOME.get(nome)
 
 
-def comandi_per_ruolo(ruolo: Role, solo_menu: bool = False) -> list[Comando]:
-    """I comandi che quel ruolo può usare (un ruolo include quelli inferiori)."""
+def comandi_per_ruolo(
+    ruolo: Role, solo_menu: bool = False, sezione: str | None = None
+) -> list[Comando]:
+    """I comandi che quel ruolo può usare (un ruolo include quelli inferiori).
+
+    Con `sezione` restituisce i soli comandi di quell'area della pulsantiera.
+    """
     return [
         c
         for c in COMMANDS
-        if c.ruolo <= ruolo and (c.nel_menu if solo_menu else c.nell_help)
+        if c.ruolo <= ruolo
+        and (c.nel_menu if solo_menu else c.nell_help)
+        and (sezione is None or c.sezione == sezione)
+    ]
+
+
+def trova_sezione(chiave: str) -> Sezione | None:
+    return SEZIONI_PER_CHIAVE.get(chiave)
+
+
+def sezioni_per_ruolo(ruolo: Role) -> list[Sezione]:
+    """Le sole sezioni che per quel ruolo hanno almeno un pulsante.
+
+    Un cittadino non deve vedere «Amministrazione», e una sezione senza comandi
+    visibili mostrerebbe una tastiera con il solo «Indietro».
+    """
+    return [
+        sezione
+        for sezione in SEZIONI
+        if comandi_per_ruolo(ruolo, solo_menu=True, sezione=sezione.chiave)
     ]
 
 

@@ -59,7 +59,7 @@ def cognome_elenco(cognome: object) -> str:
 
 
 def username_o_placeholder(username: str | None, placeholder: str = "(nessuno username)") -> str:
-    """Tag vero e proprio (notifica l'utente): solo per /tagall."""
+    """Tag vero e proprio (notifica l'utente): solo per /tagga_cittadini."""
     return f"@{username}" if username else placeholder
 
 
@@ -69,7 +69,7 @@ def username_senza_tag(username: str | None, placeholder: str = "(nessuno userna
 
 
 def format_row(row: Mapping) -> str:
-    """Riga compatta usata da /cerca: «#3 — 12345 — Mario Rossi (@mariorossi)»."""
+    """Riga compatta usata da /cerca_cittadino: «#3 — 12345 — Mario Rossi (@mariorossi)»."""
     # Il placeholder qui è senza parentesi: le mette la riga stessa.
     utente = username_senza_tag(row["username"], "nessuno username")
     return (
@@ -79,7 +79,7 @@ def format_row(row: Mapping) -> str:
 
 
 def riga_elenco(row: Mapping) -> str:
-    """Riga in MarkdownV2 usata da /elenco: «• *Mario Rossi* — @mariorossi»."""
+    """Riga in MarkdownV2 usata da /elenco_cittadini: «• *Mario Rossi* — @mariorossi»."""
     nome = escape_markdown_v2(row["nome"])
     cognome = escape_markdown_v2(cognome_elenco(row["cognome"]))
     if row["username"]:
@@ -124,7 +124,7 @@ def spezza_in_blocchi(
 
 
 def tabella_markdown(righe: Iterable[Mapping], totale: int) -> str:
-    """Documento Markdown completo prodotto da /esporta."""
+    """Documento Markdown completo prodotto da /esporta_cittadini."""
     linee = [
         "# Registro Cittadini",
         "",

@@ -16,11 +16,15 @@ STATO_ACCETTATA = "accettata"
 STATO_RIFIUTATA = "rifiutata"
 
 ATTIVITA_ATTIVA = "ATTIVA"
+# Ritiro volontario del proprietario, distinto dai due atti d'ufficio del
+# Ministero: lo stato dice in quale veste l'attività è stata chiusa.
+ATTIVITA_CHIUSA = "CHIUSA"
 ATTIVITA_RIMOSSA = "RIMOSSA"
 ATTIVITA_RIFIUTATA = "RIFIUTATA"
 
 ETICHETTE_STATO_ATTIVITA = {
     ATTIVITA_ATTIVA: "attiva",
+    ATTIVITA_CHIUSA: "chiusa",
     ATTIVITA_RIMOSSA: "rimossa",
     ATTIVITA_RIFIUTATA: "rifiutata",
 }
@@ -507,12 +511,17 @@ def chiudi_attivita(
     admin_id: int,
     admin_username: str | None,
 ) -> bool:
-    """Porta l'attività a RIMOSSA/RIFIUTATA, ma solo se è ancora ATTIVA.
+    """Porta l'attività a CHIUSA/RIMOSSA/RIFIUTATA, ma solo se è ancora ATTIVA.
 
     Restituisce False se qualcun altro l'aveva già chiusa. È l'UPDATE
     condizionato a decidere l'esito, non una lettura precedente: così due
     amministratori che premono il pulsante nello stesso istante non producono
-    due moderazioni.
+    due moderazioni, e un ritiro volontario che arriva dopo una moderazione
+    (o viceversa) perde correttamente.
+
+    Le colonne admin_id e admin_username registrano *chi ha chiuso*: per un
+    ritiro volontario è il proprietario stesso, e lo stato dice in quale veste.
+    Si tengono i nomi delle colonne per non richiedere una migrazione.
     """
     cursore = conn.execute(
         """

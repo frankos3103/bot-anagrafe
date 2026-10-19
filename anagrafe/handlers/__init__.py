@@ -24,8 +24,13 @@ from telegram.ext import (
 )
 
 from . import comandi
-from .attivita import cmd_elenco_attivita, cmd_modera_attivita, on_attivita_callback
-from .importazione import cmd_importa, on_documento
+from .attivita import (
+    cmd_elenco_attivita,
+    cmd_modera_attivita,
+    cmd_rimuovi_attivita,
+    on_attivita_callback,
+)
+from .importazione import cmd_importa_cittadini, on_documento
 from .menu import build_menu_handler
 from .misc import aggiorna_tag, catch_all, on_error
 from .richieste import on_richiesta_callback
@@ -33,18 +38,19 @@ from .richieste import on_richiesta_callback
 COMANDI = {
     "start": comandi.cmd_start,
     "help": comandi.cmd_help,
-    "elenco": comandi.cmd_elenco,
-    "esporta": comandi.cmd_esporta,
-    "cerca": comandi.cmd_cerca,
-    "richiedi": comandi.cmd_richiedi,
-    "inserisci": comandi.cmd_inserisci,
-    "rimuovi": comandi.cmd_rimuovi,
-    "tagall": comandi.cmd_tagall,
-    "importa": cmd_importa,
+    "elenco_cittadini": comandi.cmd_elenco_cittadini,
+    "esporta_cittadini": comandi.cmd_esporta_cittadini,
+    "cerca_cittadino": comandi.cmd_cerca_cittadino,
+    "richiedi_cittadinanza": comandi.cmd_richiedi_cittadinanza,
+    "inserisci_cittadino": comandi.cmd_inserisci_cittadino,
+    "rimuovi_cittadino": comandi.cmd_rimuovi_cittadino,
+    "tagga_cittadini": comandi.cmd_tagga_cittadini,
+    "importa_cittadini": cmd_importa_cittadini,
     "aggiungi_admin": comandi.cmd_aggiungi_admin,
     "rimuovi_admin": comandi.cmd_rimuovi_admin,
     "elenco_admin": comandi.cmd_elenco_admin,
     "elenco_attivita": cmd_elenco_attivita,
+    "rimuovi_attivita": cmd_rimuovi_attivita,
     "modera_attivita": cmd_modera_attivita,
     # «attivita» NON va qui: ha wizard_diretto=True, quindi sta negli
     # entry_points di build_menu_handler(). La ConversationHandler è

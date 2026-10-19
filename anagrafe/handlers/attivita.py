@@ -52,6 +52,13 @@ EMOJI_MODERAZIONE = {
     repository.ATTIVITA_RIMOSSA: "➖",
 }
 
+# Un ritiro volontario e un atto d'ufficio si raccontano in modo diverso, pur
+# producendo lo stesso effetto sull'elenco pubblico.
+VERBO_RIMOZIONE = {
+    repository.ATTIVITA_CHIUSA: "ritirata dal proprietario",
+    repository.ATTIVITA_RIMOSSA: "rimossa d'ufficio",
+}
+
 AVVISO_GAZZETTA = (
     "⚠️ Non sono riuscito a togliere il post dalla Gazzetta Ciompista: "
     "rimuovilo a mano."
@@ -78,7 +85,7 @@ def tastiera_moderazione(attivita_id: int) -> InlineKeyboardMarkup:
 # Iscrizione
 # ----------------------------------------------------------------------
 
-async def azione_attivita(
+async def azione_registra_attivita(
     update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori
 ) -> None:
     """Iscrive l'attività, la pubblica in Gazzetta e avvisa il Ministero."""
@@ -177,6 +184,99 @@ async def azione_elenco_attivita(
     intestazione = f"📋 *Registro Pubblico delle Attività* \\({len(righe)}\\)"
     for blocco in spezza_in_blocchi([riga_attivita(r) for r in righe], intestazione):
         await rispondi(update, blocco, parse_mode="MarkdownV2")
+
+
+# ----------------------------------------------------------------------
+# Rimozione
+# ----------------------------------------------------------------------
+
+async def azione_rimuovi_attivita(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori
+) -> None:
+    """Il proprietario ritira la propria attività, l'admin la rimuove d'ufficio."""
+    utente = update.effective_user
+    attivita_id = valori["attivita"]
+    e_admin = get_roles(context).is_admin(utente.id)
+
+    with db(context) as conn:
+        try:
+            # Ricontrollato qui: fra il wizard e la conferma la proprietà o lo
+            # stato possono essere cambiati.
+            riga = controlli.verifica_attivita_rimovibile(
+                conn, attivita_id, utente.id, e_admin
+            )
+        except ErroreValidazione as exc:
+            await rispondi(update, f"⚠️ {exc}")
+            return
+
+        # Lo stato dipende da chi agisce, non dal ruolo: un amministratore che
+        # ritira la *propria* attività fa un ritiro volontario, non un atto
+        # d'ufficio.
+        proprio = riga["owner_id"] == utente.id
+        stato = (
+            repository.ATTIVITA_CHIUSA if proprio else repository.ATTIVITA_RIMOSSA
+        )
+
+        if not repository.chiudi_attivita(
+            conn, attivita_id, stato, utente.id, utente.username
+        ):
+            aggiornata = repository.get_attivita(conn, attivita_id)
+            etichetta = repository.ETICHETTE_STATO_ATTIVITA.get(
+                aggiornata["stato"], aggiornata["stato"]
+            )
+            await rispondi(
+                update, f"⚠️ L'attività #{attivita_id} è già {etichetta}."
+            )
+            return
+
+    nome = riga["nome_attivita"]
+    conferma = (
+        f"✅ Attività #{attivita_id} «{nome}» "
+        f"{'ritirata dal Registro Pubblico' if proprio else 'rimossa dal Registro'}."
+    )
+
+    esito_post = await chiudi_post(context, riga)
+    if esito_post == POST_CANCELLATO:
+        with db(context) as conn:
+            repository.set_attivita_post(conn, attivita_id, None, None)
+    elif esito_post == POST_FALLITO:
+        conferma += f"\n\n{AVVISO_GAZZETTA}"
+
+    await rispondi(update, conferma)
+
+    # Le schede in mano al Ministero non devono restare con i pulsanti attivi:
+    # l'attività non è più moderabile.
+    await aggiorna_copie_notifica(
+        context,
+        riga["notifiche"],
+        f"➖ Attività #{attivita_id} {VERBO_RIMOZIONE[stato]}.\n{nome}",
+    )
+
+    if not proprio:
+        await avvisa_in_privato(
+            context,
+            riga["owner_id"],
+            f"➖ La tua attività «{nome}» (#{attivita_id}) è stata rimossa "
+            "d'ufficio dal Registro Pubblico delle Attività.",
+        )
+
+    await send_log(
+        context,
+        f"➖ *Attività {VERBO_RIMOZIONE[stato]}* #{attivita_id}\n"
+        f"{escape_markdown_legacy(nome)} — "
+        f"{etichetta_tipologia(riga['tipologia'])}\n"
+        f"Proprietario: {fmt_username(riga['owner_username'])} "
+        f"(Telegram ID {riga['owner_id']})\n"
+        f"Da: {fmt_utente(utente)}",
+    )
+
+    if esito_post == POST_FALLITO:
+        await send_log(
+            context,
+            f"⚠️ *Gazzetta non aggiornata* — attività #{attivita_id}\n"
+            "Il post pubblico non si è potuto né cancellare né riscrivere: "
+            "va rimosso a mano.",
+        )
 
 
 # ----------------------------------------------------------------------
@@ -318,6 +418,19 @@ async def cmd_elenco_attivita(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
     await azione_elenco_attivita(update, context, {})
+
+
+async def cmd_rimuovi_attivita(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    try:
+        attivita_id = valida_attivita_id(argomenti(update))
+    except ErroreValidazione as exc:
+        await rispondi(
+            update, f"⚠️ {exc}\n\n{render_uso(trova_comando('rimuovi_attivita'))}"
+        )
+        return
+    await azione_rimuovi_attivita(update, context, {"attivita": attivita_id})
 
 
 async def cmd_modera_attivita(

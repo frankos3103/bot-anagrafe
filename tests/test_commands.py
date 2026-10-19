@@ -5,13 +5,16 @@ import pytest
 from anagrafe.commands import (
     COMMANDS,
     ETICHETTE_TIPOLOGIA,
+    SEZIONI,
     TIPOLOGIE_ATTIVITA,
     comandi_menu_telegram,
     comandi_per_ruolo,
     etichetta_tipologia,
     render_help,
     render_uso,
+    sezioni_per_ruolo,
     trova_comando,
+    trova_sezione,
 )
 from anagrafe.roles import Role
 
@@ -22,20 +25,20 @@ def nomi(ruolo, solo_menu=False):
 
 def test_il_pubblico_non_vede_i_comandi_riservati():
     visibili = nomi(Role.PUBBLICO)
-    assert {"elenco", "esporta", "cerca", "richiedi", "help", "menu"} <= visibili
-    assert not visibili & {"inserisci", "rimuovi", "importa", "tagall"}
+    assert {"elenco_cittadini", "esporta_cittadini", "cerca_cittadino", "richiedi_cittadinanza", "help", "menu"} <= visibili
+    assert not visibili & {"inserisci_cittadino", "rimuovi_cittadino", "importa_cittadini", "tagga_cittadini"}
     assert not visibili & {"aggiungi_admin", "rimuovi_admin", "elenco_admin"}
 
 
 def test_ladmin_vede_anche_i_comandi_admin():
     visibili = nomi(Role.ADMIN)
-    assert {"inserisci", "rimuovi", "importa", "elenco", "tagall"} <= visibili
+    assert {"inserisci_cittadino", "rimuovi_cittadino", "importa_cittadini", "elenco_cittadini", "tagga_cittadini"} <= visibili
     assert not visibili & {"aggiungi_admin", "rimuovi_admin", "elenco_admin"}
 
 
 def test_il_root_vede_tutto():
     visibili = nomi(Role.ROOT)
-    assert {"aggiungi_admin", "rimuovi_admin", "elenco_admin", "inserisci"} <= visibili
+    assert {"aggiungi_admin", "rimuovi_admin", "elenco_admin", "inserisci_cittadino"} <= visibili
 
 
 def test_i_ruoli_sono_cumulativi():
@@ -60,16 +63,16 @@ def test_help_e_menu_non_sono_pulsanti():
 
 def test_aiuto_pubblico():
     testo = render_help(Role.PUBBLICO)
-    assert "/elenco" in testo
-    assert "/inserisci" not in testo
+    assert "/elenco_cittadini" in testo
+    assert "/inserisci_cittadino" not in testo
     assert "/aggiungi_admin" not in testo
     assert "Comandi amministratore" not in testo
 
 
 def test_aiuto_admin():
     testo = render_help(Role.ADMIN)
-    assert "/elenco" in testo
-    assert "/inserisci" in testo
+    assert "/elenco_cittadini" in testo
+    assert "/inserisci_cittadino" in testo
     assert "Comandi amministratore" in testo
     assert "/aggiungi_admin" not in testo
     assert "Comandi root" not in testo
@@ -116,24 +119,52 @@ def test_ogni_comando_del_menu_e_eseguibile():
     from anagrafe.handlers.azioni import AZIONI
 
     for comando in comandi_per_ruolo(Role.ROOT, solo_menu=True):
-        assert comando.nome in AZIONI or comando.nome == "importa"
+        assert comando.nome in AZIONI or comando.attende_allegato
+
+
+def test_nessuna_chiave_orfana_nei_dizionari_dei_comandi():
+    """Ogni chiave che nomina un comando deve nominarne uno che esiste.
+
+    I comandi sono indicizzati per nome in quattro dizionari diversi. Una chiave
+    rimasta con un nome vecchio, o scritta male, non darebbe alcun errore:
+    resterebbe soltanto morta, e il comando non risponderebbe. È la rete che
+    rende sicuro rinominare un comando.
+    """
+    from anagrafe.handlers import COMANDI
+    from anagrafe.handlers.azioni import AZIONI
+    from anagrafe.handlers.controlli import PRECONDIZIONI, VERIFICHE_CAMPO
+
+    for etichetta, dizionario in (
+        ("COMANDI", COMANDI),
+        ("AZIONI", AZIONI),
+        ("PRECONDIZIONI", PRECONDIZIONI),
+    ):
+        for nome in dizionario:
+            assert trova_comando(nome) is not None, f"{etichetta}: «{nome}»"
+
+    # VERIFICHE_CAMPO è indicizzata per (comando, campo): vanno verificati entrambi.
+    for nome, chiave_campo in VERIFICHE_CAMPO:
+        comando = trova_comando(nome)
+        assert comando is not None, f"VERIFICHE_CAMPO: «{nome}»"
+        chiavi = {campo.chiave for campo in comando.campi}
+        assert chiave_campo in chiavi, f"VERIFICHE_CAMPO: «{nome}» non ha il campo «{chiave_campo}»"
 
 
 def test_trova_comando():
-    assert trova_comando("elenco").nome == "elenco"
+    assert trova_comando("elenco_cittadini").nome == "elenco_cittadini"
     assert trova_comando("inesistente") is None
 
 
 def test_render_uso_include_lesempio():
-    testo = render_uso(trova_comando("inserisci"))
-    assert "/inserisci" in testo
+    testo = render_uso(trova_comando("inserisci_cittadino"))
+    assert "/inserisci_cittadino" in testo
     assert "Esempio" in testo
 
 
 def test_menu_nativo_solo_pubblico():
     nomi_menu = {nome for nome, _ in comandi_menu_telegram()}
     assert nomi_menu <= nomi(Role.PUBBLICO)
-    assert "inserisci" not in nomi_menu
+    assert "inserisci_cittadino" not in nomi_menu
     assert all(descrizione for _, descrizione in comandi_menu_telegram())
 
 
@@ -196,7 +227,7 @@ def test_i_campi_senza_opzioni_non_sono_cambiati():
 
 
 def test_il_riepilogo_mostra_letichetta_non_la_chiave():
-    campo = trova_comando("attivita").campi[1]
+    campo = trova_comando("registra_attivita").campi[1]
     assert campo.mostra("privata") == "💼 Attività Privata"
     assert campo.mostra(None) == "(nessuno)"
 
@@ -251,10 +282,142 @@ def test_etichetta_di_una_tipologia_sconosciuta():
 
 def test_i_comandi_del_registro_e_i_loro_ruoli():
     pubblici = nomi(Role.PUBBLICO)
-    assert {"attivita", "elenco_attivita"} <= pubblici
+    assert {"registra_attivita", "elenco_attivita"} <= pubblici
     assert "modera_attivita" not in pubblici
     assert "modera_attivita" in nomi(Role.ADMIN)
 
 
 def test_la_moderazione_non_sta_nel_menu_nativo():
     assert "modera_attivita" not in {n for n, _ in comandi_menu_telegram()}
+
+
+# ----------------------------------------------------------------------
+# Sezioni della pulsantiera
+# ----------------------------------------------------------------------
+
+def test_ogni_comando_del_menu_ha_una_sezione():
+    """Un pulsante senza area sarebbe irraggiungibile dalla pulsantiera.
+
+    Comparirebbe in /help ma in nessuna delle viste, perché queste elencano i
+    comandi sezione per sezione.
+    """
+    for comando in comandi_per_ruolo(Role.ROOT, solo_menu=True):
+        assert trova_sezione(comando.sezione) is not None, comando.nome
+
+
+def test_i_comandi_fuori_dalla_pulsantiera_non_hanno_sezione():
+    for comando in COMMANDS:
+        if not comando.nel_menu:
+            assert comando.sezione == "", comando.nome
+
+
+def test_ogni_sezione_ha_almeno_un_comando():
+    """Nessuna sezione decorativa: mostrerebbe una tastiera vuota."""
+    for sezione in SEZIONI:
+        comandi = comandi_per_ruolo(Role.ROOT, solo_menu=True, sezione=sezione.chiave)
+        assert comandi, sezione.chiave
+
+
+def test_le_chiavi_delle_sezioni_sono_uniche():
+    chiavi = [s.chiave for s in SEZIONI]
+    assert len(chiavi) == len(set(chiavi))
+
+
+def test_le_sezioni_visibili_crescono_col_ruolo():
+    pubblico = sezioni_per_ruolo(Role.PUBBLICO)
+    root = sezioni_per_ruolo(Role.ROOT)
+    assert [s.chiave for s in pubblico] == ["cittadini", "attivita"]
+    assert [s.chiave for s in root] == ["cittadini", "attivita", "amministrazione"]
+
+
+def test_un_cittadino_non_vede_lamministrazione():
+    assert "amministrazione" not in {s.chiave for s in sezioni_per_ruolo(Role.PUBBLICO)}
+    assert not comandi_per_ruolo(
+        Role.PUBBLICO, solo_menu=True, sezione="amministrazione"
+    )
+
+
+def test_i_comandi_di_una_sezione_sono_filtrati_per_ruolo():
+    """La sezione dice di cosa si parla, il ruolo dice chi può: sono ortogonali."""
+    pubblici = comandi_per_ruolo(Role.PUBBLICO, solo_menu=True, sezione="cittadini")
+    admin = comandi_per_ruolo(Role.ADMIN, solo_menu=True, sezione="cittadini")
+    assert {c.nome for c in pubblici} < {c.nome for c in admin}
+    # I comandi admin sui cittadini stanno in «Cittadinanza», non in «Amministrazione».
+    assert "inserisci_cittadino" in {c.nome for c in admin}
+
+
+def test_una_sezione_inesistente_non_si_trova():
+    assert trova_sezione("inventata") is None
+    assert trova_sezione("") is None
+
+
+def test_la_somma_delle_sezioni_e_tutta_la_pulsantiera():
+    """Nessun comando resta fuori da tutte le viste."""
+    tutti = {c.nome for c in comandi_per_ruolo(Role.ROOT, solo_menu=True)}
+    per_sezione = {
+        c.nome
+        for s in SEZIONI
+        for c in comandi_per_ruolo(Role.ROOT, solo_menu=True, sezione=s.chiave)
+    }
+    assert tutti == per_sezione
+
+
+# ----------------------------------------------------------------------
+# Campi con scelte lette dal registro
+# ----------------------------------------------------------------------
+
+def _campi_a_scelte():
+    return [
+        (comando, campo)
+        for comando in COMMANDS
+        for campo in comando.campi
+        if campo.a_scelte
+    ]
+
+
+def test_ogni_campo_a_scelte_ha_il_suo_fornitore():
+    """Senza fornitore il wizard non avrebbe nulla da mostrare e si bloccherebbe."""
+    from anagrafe.handlers.scelte import FORNITORI
+
+    assert _campi_a_scelte()
+    for comando, campo in _campi_a_scelte():
+        assert campo.scelte in FORNITORI, f"{comando.nome}.{campo.chiave}"
+
+
+def test_nessun_fornitore_resta_inutilizzato():
+    """Un fornitore che nessun campo richiama sarebbe codice morto."""
+    from anagrafe.handlers.scelte import FORNITORI
+
+    richiamati = {campo.scelte for _, campo in _campi_a_scelte()}
+    assert set(FORNITORI) == richiamati
+
+
+def test_un_campo_a_scelte_dice_cosa_fare_quando_e_vuoto():
+    """Senza il messaggio il bot direbbe soltanto «non c'è nulla da scegliere»."""
+    for comando, campo in _campi_a_scelte():
+        assert campo.messaggio_vuoto, f"{comando.nome}.{campo.chiave}"
+
+
+def test_un_campo_non_ha_sia_opzioni_fisse_sia_scelte():
+    """Sono due modi alternativi di riempire la stessa tastiera."""
+    for comando in COMMANDS:
+        for campo in comando.campi:
+            assert not (campo.a_pulsanti and campo.a_scelte), (
+                f"{comando.nome}.{campo.chiave}"
+            )
+
+
+def test_nessun_comando_chiede_piu_un_id_a_mano():
+    """La ragione di questo lavoro: rimozione e moderazione a pulsanti.
+
+    Se un giorno uno di questi campi perdesse il suo fornitore, tornerebbe a
+    farsi digitare un ID numerico senza che nessuno se ne accorga.
+    """
+    a_scelte = {(c.nome, campo.chiave) for c, campo in _campi_a_scelte()}
+    assert {
+        ("rimuovi_cittadino", "cittadino"),
+        ("rimuovi_attivita", "attivita"),
+        ("modera_attivita", "attivita"),
+        ("aggiungi_admin", "utente"),
+        ("rimuovi_admin", "utente"),
+    } <= a_scelte

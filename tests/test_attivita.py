@@ -61,7 +61,7 @@ def test_lelenco_mostra_solo_le_attive(conn, cittadino, attivita):
 
 
 def test_lelenco_ignora_maiuscole_e_accenti(conn, cittadino):
-    """Come /elenco: il COLLATE NOCASE di SQLite vale solo per l'ASCII."""
+    """Come /elenco_cittadini: il COLLATE NOCASE di SQLite vale solo per l'ASCII."""
     for nome in ("Zeta", "Élite", "banca"):
         _crea(conn, nome)
 
@@ -189,3 +189,53 @@ def test_notifiche_illeggibili(grezzo):
 def test_il_nome_storico_resta_disponibile():
     """richieste.py e i test esistenti usano ancora load_request_notifications."""
     assert repository.load_request_notifications is repository.load_notifiche
+
+
+# ----------------------------------------------------------------------
+# Ritiro volontario: stato distinto dall'atto d'ufficio
+# ----------------------------------------------------------------------
+
+def test_il_ritiro_volontario_ha_uno_stato_suo(conn, cittadino, attivita):
+    assert repository.chiudi_attivita(
+        conn, attivita, repository.ATTIVITA_CHIUSA, 12345, "mariorossi"
+    )
+    riga = repository.get_attivita(conn, attivita)
+    assert riga["stato"] == repository.ATTIVITA_CHIUSA
+    # Le colonne admin_* registrano chi ha chiuso: qui il proprietario.
+    assert riga["admin_id"] == 12345
+
+
+def test_unattivita_ritirata_esce_dallelenco(conn, cittadino, attivita):
+    repository.chiudi_attivita(conn, attivita, repository.ATTIVITA_CHIUSA, 12345, None)
+    assert repository.list_attivita_attive(conn) == []
+    assert repository.count_attivita_attive(conn) == 0
+
+
+def test_una_moderazione_dopo_un_ritiro_perde(conn, cittadino, attivita):
+    """Il compare-and-swap vale per tutti gli stati di arrivo."""
+    assert repository.chiudi_attivita(
+        conn, attivita, repository.ATTIVITA_CHIUSA, 12345, None
+    )
+    assert not repository.chiudi_attivita(
+        conn, attivita, repository.ATTIVITA_RIMOSSA, 100, "capo"
+    )
+    assert repository.get_attivita(conn, attivita)["stato"] == repository.ATTIVITA_CHIUSA
+
+
+def test_rimuovi_e_reimmetti(conn, cittadino, attivita):
+    """La correzione di un'attività si fa così: l'indice unico è parziale."""
+    repository.chiudi_attivita(conn, attivita, repository.ATTIVITA_CHIUSA, 12345, None)
+    nuova = _crea(conn, "Pizzeria Da Mario")
+    assert nuova != attivita
+    nomi = [r["nome_attivita"] for r in repository.list_attivita_attive(conn)]
+    assert nomi == ["Pizzeria Da Mario"]
+
+
+def test_ogni_stato_ha_unetichetta_leggibile():
+    for stato in (
+        repository.ATTIVITA_ATTIVA,
+        repository.ATTIVITA_CHIUSA,
+        repository.ATTIVITA_RIMOSSA,
+        repository.ATTIVITA_RIFIUTATA,
+    ):
+        assert repository.ETICHETTE_STATO_ATTIVITA[stato]

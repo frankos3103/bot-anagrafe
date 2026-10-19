@@ -125,7 +125,7 @@ def precondizione_attivita(conn: sqlite3.Connection, telegram_id: int) -> sqlite
         raise ErroreValidazione(
             "Il Registro Pubblico delle Attività è riservato ai cittadini "
             "della Repubblica. Non risulti iscritto all'anagrafe: invia prima "
-            "una richiesta di cittadinanza con /richiedi."
+            "una richiesta di cittadinanza con /richiedi_cittadinanza."
         )
     return cittadino
 
@@ -172,4 +172,30 @@ def verifica_attivita_moderabile(
         raise ErroreValidazione(
             f"L'attività #{attivita_id} è già {etichetta}."
         )
+    return riga
+
+
+def verifica_attivita_rimovibile(
+    conn: sqlite3.Connection, attivita_id: int, telegram_id: int, e_admin: bool
+) -> sqlite3.Row:
+    """L'attività esiste, è ancora attiva, ed è tua oppure sei un amministratore.
+
+    È il primo controllo per risorsa del progetto: i ruoli sono globali, ma qui
+    il permesso dipende da chi è il proprietario. Il messaggio di rifiuto non
+    rivela nulla dell'attività altrui, così chi indovina un ID non scopre né
+    che esiste né di chi è.
+    """
+    riga = repository.get_attivita(conn, attivita_id)
+    if riga is None or not (e_admin or riga["owner_id"] == telegram_id):
+        raise ErroreValidazione(
+            f"Nessuna tua attività con ID #{attivita_id}. "
+            "Le tue attività le trovi in /elenco_attivita."
+        )
+
+    if riga["stato"] != repository.ATTIVITA_ATTIVA:
+        etichetta = repository.ETICHETTE_STATO_ATTIVITA.get(
+            riga["stato"], riga["stato"]
+        )
+        raise ErroreValidazione(f"L'attività #{attivita_id} è già {etichetta}.")
+
     return riga

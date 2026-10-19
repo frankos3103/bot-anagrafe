@@ -1,7 +1,7 @@
 """Validazione e parsing degli argomenti dei comandi.
 
 Queste funzioni non sanno nulla di Telegram: sono usate sia dai comandi testuali
-(/inserisci ...) sia dal wizard di /menu sia dall'import CSV, così la stessa
+(/inserisci_cittadino ...) sia dal wizard di /menu sia dall'import CSV, così la stessa
 regola non viene riscritta tre volte.
 """
 
@@ -251,7 +251,7 @@ def parse_riferimento(valore: str, default: str) -> Riferimento:
 
 
 def valida_riferimento_cittadino(valore: str) -> Riferimento:
-    """Per /rimuovi: un numero nudo è un ID cittadino o un ID Telegram."""
+    """Per /rimuovi_cittadino: un numero nudo è un ID cittadino o un ID Telegram."""
     return parse_riferimento(valore, RIF_NUMERO)
 
 

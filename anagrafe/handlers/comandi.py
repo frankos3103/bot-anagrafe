@@ -16,15 +16,15 @@ from ..validators import (
 )
 from .azioni import (
     azione_aggiungi_admin,
-    azione_cerca,
-    azione_elenco,
+    azione_cerca_cittadino,
+    azione_elenco_cittadini,
     azione_elenco_admin,
-    azione_esporta,
-    azione_inserisci,
-    azione_richiedi,
-    azione_rimuovi,
+    azione_esporta_cittadini,
+    azione_inserisci_cittadino,
+    azione_richiedi_cittadinanza,
+    azione_rimuovi_cittadino,
     azione_rimuovi_admin,
-    azione_tagall,
+    azione_tagga_cittadini,
 )
 from .common import argomenti, rispondi, ruolo_utente
 from .controlli import PRECONDIZIONI
@@ -54,28 +54,28 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await rispondi(update, render_help(ruolo_utente(update, context)))
 
 
-async def cmd_elenco(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await azione_elenco(update, context, {})
+async def cmd_elenco_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await azione_elenco_cittadini(update, context, {})
 
 
-async def cmd_esporta(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await azione_esporta(update, context, {})
+async def cmd_esporta_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await azione_esporta_cittadini(update, context, {})
 
 
-async def cmd_cerca(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_cerca_cittadino(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         query = valida_ricerca(argomenti(update))
     except ErroreValidazione as exc:
-        await _errore_uso(update, "cerca", exc)
+        await _errore_uso(update, "cerca_cittadino", exc)
         return
-    await azione_cerca(update, context, {"query": query})
+    await azione_cerca_cittadino(update, context, {"query": query})
 
 
-async def cmd_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_richiedi_cittadinanza(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Prima di tutto: se la richiesta è comunque impossibile, è inutile
     # lamentarsi del formato degli argomenti.
     try:
-        await PRECONDIZIONI["richiedi"](update, context)
+        await PRECONDIZIONI["richiedi_cittadinanza"](update, context)
     except ErroreValidazione as exc:
         await rispondi(update, str(exc))
         return
@@ -83,22 +83,22 @@ async def cmd_richiedi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         dati = parse_richiedi(argomenti(update))
     except ErroreValidazione as exc:
-        await _errore_uso(update, "richiedi", exc)
+        await _errore_uso(update, "richiedi_cittadinanza", exc)
         return
-    await azione_richiedi(update, context, {"nome": dati.nome, "cognome": dati.cognome})
+    await azione_richiedi_cittadinanza(update, context, {"nome": dati.nome, "cognome": dati.cognome})
 
 
 # ----------------------------------------------------------------------
 # Amministratore
 # ----------------------------------------------------------------------
 
-async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_inserisci_cittadino(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         dati = parse_inserisci(argomenti(update))
     except ErroreValidazione as exc:
-        await _errore_uso(update, "inserisci", exc)
+        await _errore_uso(update, "inserisci_cittadino", exc)
         return
-    await azione_inserisci(
+    await azione_inserisci_cittadino(
         update,
         context,
         {
@@ -110,17 +110,17 @@ async def cmd_inserisci(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
-async def cmd_rimuovi(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_rimuovi_cittadino(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         cittadino = valida_riferimento_cittadino(argomenti(update))
     except ErroreValidazione as exc:
-        await _errore_uso(update, "rimuovi", exc)
+        await _errore_uso(update, "rimuovi_cittadino", exc)
         return
-    await azione_rimuovi(update, context, {"cittadino": cittadino})
+    await azione_rimuovi_cittadino(update, context, {"cittadino": cittadino})
 
 
-async def cmd_tagall(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await azione_tagall(update, context, {})
+async def cmd_tagga_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await azione_tagga_cittadini(update, context, {})
 
 
 # ----------------------------------------------------------------------

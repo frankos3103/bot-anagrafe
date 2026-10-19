@@ -66,7 +66,7 @@ def test_nessuna_foreign_key_su_attivita(conn):
     Quella colonna non è la primary key e il suo indice unico può mancare sui
     registri con ID Telegram duplicati: con i vincoli attivi, una FK verso una
     colonna non unica farebbe fallire ogni INSERT con «foreign key mismatch»,
-    e senza ON DELETE bloccherebbe /rimuovi. Il vincolo di cittadinanza è
+    e senza ON DELETE bloccherebbe /rimuovi_cittadino. Il vincolo di cittadinanza è
     applicato in controlli.precondizione_attivita.
     """
     assert conn.execute("PRAGMA foreign_key_list('attivita')").fetchall() == []
@@ -81,7 +81,7 @@ def test_si_puo_iscrivere_anche_senza_il_cittadino(conn):
 
 
 def test_rimuovere_un_cittadino_con_attivita_funziona(conn, cittadino, attivita):
-    """Una FK con RESTRICT implicito avrebbe rotto /rimuovi."""
+    """Una FK con RESTRICT implicito avrebbe rotto /rimuovi_cittadino."""
     riga = repository.delete_citizen(conn, cittadino)
     assert riga is not None
     assert repository.get_attivita(conn, attivita) is not None

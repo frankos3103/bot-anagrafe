@@ -47,7 +47,7 @@ def test_format_row_non_tagga_nessuno():
 
 
 def test_username_o_placeholder():
-    """Tag vero e proprio: usato solo da /tagall."""
+    """Tag vero e proprio: usato solo da /tagga_cittadini."""
     assert username_o_placeholder("tizio") == "@tizio"
     assert username_o_placeholder(None) == "(nessuno username)"
 
@@ -225,7 +225,7 @@ def test_la_pietra_tombale_cita_il_nome_e_il_decreto():
 
 
 def test_la_riga_dellelenco_non_tagga_nessuno():
-    """Come /elenco: un elenco non deve notificare cinquanta persone."""
+    """Come /elenco_cittadini: un elenco non deve notificare cinquanta persone."""
     assert SPAZIO_LARGHEZZA_ZERO in riga_attivita(attivita())
 
 

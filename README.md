@@ -6,35 +6,66 @@ Tiene l'elenco dei cittadini in un database SQLite, gestisce le richieste di
 cittadinanza con approvazione da parte degli amministratori, cura il Registro
 Pubblico delle Attività, e registra ogni modifica su un canale Telegram di log.
 
+## Table of Contents
+
+- [Bot Anagrafe](#bot-anagrafe)
+  - [Table of Contents](#table-of-contents)
+  - [Funzionalità](#funzionalità)
+  - [Requisiti](#requisiti)
+  - [Installazione](#installazione)
+  - [Configurazione](#configurazione)
+  - [Avvio](#avvio)
+  - [Comandi](#comandi)
+    - [Per tutti](#per-tutti)
+    - [Amministratori](#amministratori)
+    - [Root](#root)
+  - [La pulsantiera `/menu`](#la-pulsantiera-menu)
+  - [Import da CSV](#import-da-csv)
+  - [Ruoli e amministratori](#ruoli-e-amministratori)
+  - [Registro Pubblico delle Attività](#registro-pubblico-delle-attività)
+  - [Log su canale](#log-su-canale)
+  - [Note su Telegram](#note-su-telegram)
+  - [Test](#test)
+  - [Struttura del progetto](#struttura-del-progetto)
+    - [Schema del database](#schema-del-database)
+
+
 ---
 
 ## Funzionalità
 
-- **Registro dei cittadini** consultabile da chiunque (`/elenco`, `/cerca`) ed
-  esportabile in Markdown (`/esporta`).
-- **Richieste di cittadinanza** (`/richiedi`): ogni amministratore riceve una
+- **Registro dei cittadini** consultabile da chiunque (`/elenco_cittadini`, `/cerca_cittadino`) ed
+  esportabile in Markdown (`/esporta_cittadini`).
+- **Richieste di cittadinanza** (`/richiedi_cittadinanza`): ogni amministratore riceve una
   notifica in privato con i pulsanti *Accetta* / *Rifiuta*. Quando uno decide,
   la notifica si aggiorna per tutti gli altri e il richiedente viene avvisato.
 - **Gestione del registro** riservata agli amministratori: inserimento singolo
-  (`/inserisci`), rimozione (`/rimuovi`) e **import di massa da CSV**
-  (`/importa`).
-- **Registro Pubblico delle Attività** (`/attivita`, `/elenco_attivita`):
+  (`/inserisci_cittadino`), rimozione (`/rimuovi_cittadino`) e **import di massa da CSV**
+  (`/importa_cittadini`).
+- **Registro Pubblico delle Attività** (`/registra_attivita`, `/elenco_attivita`):
   ogni cittadino iscrive gratuitamente la propria organizzazione, associazione
   o attività privata. L'iscrizione è immediata, la scheda viene pubblicata
   sulla Gazzetta Ciompista e il Ministero dell'Interno può rifiutarla o
-  eliminarla d'ufficio *dopo* (vedi sotto).
+  eliminarla d'ufficio *dopo* (vedi sotto). Il proprietario può ritirare la
+  propria attività con `/rimuovi_attivita`.
 - **Tre livelli di autorizzazione**: pubblico, amministratore, root.
-- **Pulsantiera guidata** (`/menu`): esegue tutti i comandi senza doverne
-  ricordare la sintassi, chiedendo i dati un campo alla volta.
+- **Pulsantiera guidata a due livelli** (`/menu`): prima si sceglie l'area
+  (*Cittadinanza*, *Attività*, *Amministrazione*), poi l'azione. Esegue tutti i
+  comandi senza doverne ricordare la sintassi, chiedendo i dati un campo alla
+  volta.
+- **Nomi dei comandi espliciti**: ogni comando dice su cosa opera
+  (`/elenco_cittadini` e `/elenco_attivita`, non `/elenco`).
+- **Niente ID da copiare a mano**: rimuovere un cittadino o un'attività, e
+  moderarla, si fa scegliendo da un elenco di pulsanti con nomi e tag.
 - **Aiuto dinamico** (`/help`): mostra solo i comandi che chi lo invoca può
   davvero usare.
 - **Username sempre aggiornati**: a ogni interazione con il bot (in privato,
   in un gruppo o premendo un pulsante) il `@username` di un cittadino viene
   aggiornato nel registro. Un tag appartiene a un solo utente alla volta: se lo
   prende qualcun altro, viene tolto al cittadino che lo aveva prima.
-- **Il tag al posto dell'ID**: `/rimuovi`, `/aggiungi_admin` e `/rimuovi_admin`
+- **Il tag al posto dell'ID**: `/rimuovi_cittadino`, `/aggiungi_admin` e `/rimuovi_admin`
   accettano anche `@username` (di un cittadino) oltre all'ID.
-- **Ricerca per parole**: `/cerca Mario Rossi` (in qualunque ordine, ignorando
+- **Ricerca per parole**: `/cerca_cittadino Mario Rossi` (in qualunque ordine, ignorando
   maiuscole e accenti); se non trova nulla propone i nomi più simili.
 - **Errori subito**: un'operazione destinata a fallire (es. richiedere la
   cittadinanza quando la si ha già, rimuovere un ID inesistente) lo dice prima
@@ -106,20 +137,22 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | `/start` | Presentazione del bot e comandi disponibili. |
 | `/help` | Elenco dei comandi che *tu* puoi usare. |
 | `/menu` | Apre la pulsantiera guidata. |
-| `/elenco` | Elenco completo dei cittadini (nome, cognome, username). |
-| `/esporta` | Invia il registro come file Markdown. |
-| `/cerca <testo>` | Cerca per nome e/o cognome (in qualunque ordine), `@username`, `#ID` o ID Telegram. Senza risultati esatti propone i nomi più simili. |
-| `/richiedi <nome>, <cognome>` | Invia una richiesta di cittadinanza. |
-| `/attivita` | Iscrive una tua attività al Registro Pubblico. Procedura guidata a passi; richiede la cittadinanza. |
+| `/elenco_cittadini` | Elenco completo dei cittadini (nome, cognome, username). |
+| `/esporta_cittadini` | Invia il registro come file Markdown. |
+| `/cerca_cittadino <testo>` | Cerca per nome e/o cognome (in qualunque ordine), `@username`, `#ID` o ID Telegram. Senza risultati esatti propone i nomi più simili. |
+| `/richiedi_cittadinanza <nome>, <cognome>` | Invia una richiesta di cittadinanza. |
+| `/registra_attivita` | Iscrive una tua attività al Registro Pubblico. Procedura guidata a passi; richiede la cittadinanza. |
 | `/elenco_attivita` | Elenco delle attività iscritte al Registro Pubblico. |
+| `/rimuovi_attivita <ID_attività>` | Ritira una tua attività dal Registro. Un amministratore può usarlo su qualunque attività. |
 
 ### Amministratori
 
 | Comando | Cosa fa |
 |---|---|
-| `/inserisci <ID_telegram>, <username>, <nome>, <cognome>` | Inserisce un cittadino. Lo username può essere lasciato vuoto. |
-| `/rimuovi <ID_cittadino | ID_telegram | @username>` | Rimuove il cittadino indicato per ID cittadino (il numero dopo `#`), ID Telegram o tag. |
-| `/importa` | Importa più cittadini da un file CSV (vedi sotto). |
+| `/inserisci_cittadino <ID_telegram>, <username>, <nome>, <cognome>` | Inserisce un cittadino. Lo username può essere lasciato vuoto. |
+| `/rimuovi_cittadino <ID_cittadino | ID_telegram | @username>` | Rimuove il cittadino indicato per ID cittadino (il numero dopo `#`), ID Telegram o tag. |
+| `/tagga_cittadini` | Menziona tutti i cittadini che hanno uno username. |
+| `/importa_cittadini` | Importa più cittadini da un file CSV (vedi sotto). |
 | `/modera_attivita <ID_attività>` | Rimanda la scheda di un'attività con i pulsanti *Rifiuta* / *Elimina*, utile se la notifica è andata perduta. |
 
 ### Root
@@ -134,17 +167,65 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 
 ## La pulsantiera `/menu`
 
-`/menu` mostra un pulsante per ogni comando che il tuo ruolo consente.
+`/menu` chiede prima **l'area** e poi l'azione, così le operazioni sui cittadini
+non si confondono con quelle sulle attività:
 
-- I comandi senza parametri (`/elenco`, `/esporta`, `/elenco_admin`) partono
+```
+⌨️ Pulsantiera comandi          👥 Cittadinanza
+                                 👥 Elenco      📤 Esporta
+Scegli l'area su cui      →      🔍 Cerca       📝 Richiedi
+vuoi operare.                    ➕ Inserisci   ❌ Rimuovi
+                                 📣 Tagga tutti 📥 Importa CSV
+👥 Cittadinanza
+🏪 Attività                      ⬅️ Indietro    ✖️ Chiudi
+👮 Amministrazione
+✖️ Chiudi
+```
+
+- Compaiono **solo le aree in cui il tuo ruolo ha qualcosa da fare**: un
+  cittadino non vede «Amministrazione».
+- Dentro un'area compaiono solo i comandi che puoi usare. L'area dice di che
+  cosa si parla, il ruolo dice chi può agire: per questo i comandi riservati
+  agli amministratori che riguardano i cittadini stanno in «Cittadinanza», non
+  in «Amministrazione».
+- Navigare fra le aree **riscrive lo stesso messaggio** invece di aggiungerne
+  uno: la pulsantiera resta un solo messaggio in chat.
+- Eseguito un comando, si torna **all'area da cui si era partiti**. `/menu`
+  ricomincia invece dalla scelta dell'area.
+- I comandi senza parametri (`/elenco_cittadini`, `/esporta_cittadini`, `/elenco_admin`) partono
   subito.
 - Gli altri aprono un **wizard**: il bot chiede un valore alla volta
   («Qual è il nome?», «Qual è il cognome?»), valida ogni risposta e chiude con
   un riepilogo da confermare. I campi facoltativi hanno un pulsante *Salta*.
-- Alcuni campi si compilano **a pulsanti** invece che a mano (la tipologia di
-  un'attività, per esempio). Si può comunque scrivere la risposta: il bot
-  riconosce sia l'etichetta del pulsante sia la forma senza accenti.
-- Alcuni comandi (`/attivita`) entrano **direttamente nel proprio wizard**
+- Alcuni campi si compilano **a pulsanti** invece che a mano. Le scelte fisse
+  sono dichiarate nel registro dei comandi (la tipologia di un'attività); altre
+  vengono **lette dal registro al momento della domanda**, perché dipendono dai
+  dati e da chi sta chiedendo:
+
+  ```
+  🗑 rimuovi_attivita
+  Passo 1 di 1
+
+  Quale attività vuoi rimuovere?
+
+  (3 voci; puoi anche scrivere la risposta)
+
+    💼 Pizzeria Da Mario
+    🤝 Circolo dei Ciompi
+    🏢 Cooperativa Arno
+    ❌ Annulla
+  ```
+
+  Oltre le otto voci la tastiera si impagina con le frecce `⬅️ 2/5 ➡️`.
+  Si può sempre scrivere la risposta invece di premere: il bot continua ad
+  accettare `#ID`, `@username` e ID Telegram dove li accettava prima.
+- Chi può scegliere che cosa è deciso dagli stessi controlli che poi eseguono
+  l'operazione: in `/rimuovi_attivita` un cittadino vede solo le proprie
+  attività, un amministratore tutte. Una tastiera che mostrasse voci poi
+  rifiutate sarebbe peggio di nessuna tastiera.
+- Se non c'è nulla da scegliere (nessuna attività da ritirare, registro vuoto)
+  il bot lo dice e non avvia la procedura.
+- Alcuni comandi (`/registra_attivita`) entrano **direttamente nel proprio wizard**
   quando li digiti, senza passare dalla pulsantiera. Il testo scritto dopo il
   comando viene ignorato: i dati si danno un passo alla volta.
 - *Annulla* interrompe in qualsiasi momento; il comando `/annulla` fa lo stesso.
@@ -157,7 +238,7 @@ pulsantiera è stata disegnata.
 
 ## Import da CSV
 
-Invia il file `.csv` al bot **allegandolo in chat con didascalia `/importa`**
+Invia il file `.csv` al bot **allegandolo in chat con didascalia `/importa_cittadini`**
 (oppure premi *Importa CSV* nel menu e poi manda il file).
 
 Colonne attese:
@@ -215,12 +296,12 @@ Istituito dal **Decreto Ministeriale n. 3 del 13 ottobre 2026**. L'iscrizione è
 gratuita e **non richiede approvazione preventiva**: il controllo del Ministero
 dell'Interno è *successivo*.
 
-**1. Iscrizione** — `/attivita` (o il pulsante *Registra attività* in `/menu`)
+**1. Iscrizione** — `/registra_attivita` (o il pulsante *Registra attività* in `/menu`)
 apre una procedura guidata che chiede nome, tipologia (*Organizzazione*,
 *Associazione*, *Attività Privata*, scelta con i pulsanti), descrizione e un
 contatto facoltativo, e si chiude con un riepilogo da confermare. È riservata
 ai **cittadini già iscritti all'anagrafe**: a chi non lo è il bot risponde
-rimandandolo a `/richiedi`. Ogni cittadino può iscrivere più attività, ma non
+rimandandolo a `/richiedi_cittadinanza`. Ogni cittadino può iscrivere più attività, ma non
 due attive con lo stesso nome.
 
 **2. Pubblicazione** — alla conferma l'attività è subito attiva e la sua scheda
@@ -230,10 +311,36 @@ l'attività viene iscritta comunque, e il bot lo dice: il Registro vive nel
 database, la Gazzetta ne è una vista.
 
 **3. Consultazione** — `/elenco_attivita` elenca le attività attive. Come
-`/elenco`, non genera menzioni: gli username in elenco non notificano nessuno.
+`/elenco_cittadini`, non genera menzioni: gli username in elenco non notificano nessuno.
 Nella scheda pubblicata in Gazzetta, invece, il contatto è un tag vero.
 
-**4. Moderazione** — appena un'attività è iscritta, ogni amministratore
+**4. Ritiro** — `/rimuovi_attivita` toglie un'attività dal Registro. Dalla
+pulsantiera si sceglie dall'elenco delle proprie attività, senza cercarne l'ID;
+il comando accetta comunque `/rimuovi_attivita 7` per chi preferisce digitare.
+Chi può usarlo non dipende dal ruolo ma dalla **proprietà**: il cittadino sulle
+proprie attività, l'amministratore su qualunque. Chi indica un'attività che non
+è sua riceve lo stesso messaggio che riceverebbe per un ID inesistente, così un
+ID indovinato non rivela nulla.
+
+I due casi restano distinti negli atti:
+
+| Chi | Stato nel database |
+|---|---|
+| il proprietario, sulla propria | `CHIUSA` (ritiro volontario) |
+| un amministratore, su quella di un altro | `RIMOSSA` (atto d'ufficio, con avviso al proprietario) |
+
+Un amministratore che ritira la *propria* attività fa un ritiro volontario, non
+un atto d'ufficio: lo stato dipende da chi agisce, non dal ruolo che ha.
+
+**5. Correzione: si rimuove e si reimmette** — non esiste un comando per
+modificare un'attività. Per correggerla si usa `/rimuovi_attivita` e poi di
+nuovo `/registra_attivita`: il vincolo «un nome per proprietario» vale solo fra
+le attività attive, quindi il nome torna subito disponibile. Da sapere: la
+nuova iscrizione ha un **ID diverso** e un **post nuovo** in Gazzetta, e fa
+ripartire la notifica al Ministero. Per un registro pubblico è il comportamento
+corretto — una voce corretta è una voce nuova — ma l'ID cambia.
+
+**6. Moderazione** — appena un'attività è iscritta, ogni amministratore
 (il Ministero dell'Interno) riceve in privato la sua scheda con due pulsanti:
 
 - **❌ Rifiuta** — la voce è illegittima o legata a un profilo non riconosciuto;
@@ -261,7 +368,7 @@ Se imposti `LOG_CHANNEL_ID`, il bot scrive sul canale un messaggio per ogni:
 - nuova richiesta di cittadinanza, e ogni accettazione / rifiuto / annullamento;
 - inserimento o rimozione di un cittadino;
 - import CSV andato a buon fine;
-- iscrizione, rifiuto o eliminazione di un'attività del Registro Pubblico;
+- iscrizione, ritiro, rifiuto o eliminazione di un'attività del Registro Pubblico;
 - promozione o revoca di un amministratore;
 - aggiornamento automatico di uno username (anche quando un tag passa a un altro utente).
 
@@ -326,6 +433,7 @@ anagrafe/
     ├── attivita.py    Registro delle Attività: iscrizione e moderazione
     ├── gazzetta.py    pubblicazione delle schede sul canale pubblico
     ├── notifiche.py   notifiche agli admin e aggiornamento delle copie
+    ├── scelte.py      le voci che la pulsantiera legge dal registro
     ├── importazione.py ricezione del file CSV
     └── misc.py        tag automatici e catch-all
 tests/                 test della logica (niente Telegram)
@@ -336,9 +444,21 @@ aggiungendo una voce a `COMMANDS`, il comando compare da solo in `/help`, nella
 pulsantiera `/menu` e — se pubblico — nel menu nativo di Telegram. Resta da
 scrivere la sua azione e registrarla nel dizionario `AZIONI` di
 `handlers/azioni.py`. Un campo con `opzioni=(...)` diventa una fila di pulsanti
-nel wizard; un comando con `wizard_diretto=True` entra nel proprio wizard
-appena digitato e va negli `entry_points` di `build_menu_handler()`, **non** nel
-dizionario `COMANDI`.
+nel wizard; `scelte="..."` le fa invece leggere dal registro da un fornitore in
+`handlers/scelte.py`, con `messaggio_vuoto` per il caso in cui non ci sia nulla
+da scegliere; `sezione="..."` decide in quale area della pulsantiera compare il
+pulsante; un comando con `wizard_diretto=True` entra nel proprio wizard appena
+digitato e va negli `entry_points` di `build_menu_handler()`, **non** nel
+dizionario `COMANDI`; `attende_allegato=True` lo fa uscire dal wizard per
+aspettare un file.
+
+Un test (`test_nessuna_chiave_orfana_nei_dizionari_dei_comandi`) verifica che
+ogni chiave di `COMANDI`, `AZIONI`, `PRECONDIZIONI` e `VERIFICHE_CAMPO` nomini
+un comando che esiste davvero: è la rete che rende sicuro rinominare un
+comando, perché una chiave rimasta indietro resterebbe altrimenti muta. Altri
+due test verificano che ogni scelta a pulsante — fissa o letta dal registro —
+superi il validatore del proprio campo: una scelta e il suo validatore non
+possono disallinearsi senza che la suite se ne accorga.
 
 ### Schema del database
 
@@ -352,7 +472,7 @@ di notifica inviati agli amministratori, per poterli aggiornare tutti).
 
 **`attivita`** — `attivita_id` (PK), `owner_id` (ID Telegram del proprietario),
 `owner_username`, `nome_attivita`, `tipologia`, `descrizione`, `contatto_link`,
-`stato` (`ATTIVA` / `RIMOSSA` / `RIFIUTATA`), `chat_id_pubblico` e
+`stato` (`ATTIVA` / `CHIUSA` / `RIMOSSA` / `RIFIUTATA`), `chat_id_pubblico` e
 `message_id_pubblico` (il post in Gazzetta, per poterlo togliere),
 `created_at`, `admin_id`, `admin_username`, `data_moderazione`, `notifiche`.
 
@@ -363,6 +483,12 @@ unico può mancare sui registri che contengono ID Telegram duplicati. Con
 fallire ogni inserimento, e senza `ON DELETE` impedirebbe di rimuovere un
 cittadino che ha delle attività. Il requisito di cittadinanza è applicato in
 `controlli.precondizione_attivita`, come già accade per `richieste`.
+
+Le colonne `admin_id`, `admin_username` e `data_moderazione` registrano *chi ha
+chiuso* l'attività: per un ritiro volontario è il proprietario stesso, e lo
+`stato` dice in quale veste. L'indice unico su `(owner_id, nome_attivita)` è
+**parziale**, limitato alle attività `ATTIVA`: è ciò che permette di correggere
+un'attività rimuovendola e reimmettendola con lo stesso nome.
 
 Le tabelle vengono create al primo avvio con `CREATE TABLE IF NOT EXISTS`: un
 `registro.db` già esistente acquisisce `attivita` da sé, senza migrazioni.

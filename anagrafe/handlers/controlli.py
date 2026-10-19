@@ -80,6 +80,18 @@ async def _verifica_nome_attivita(
         )
 
 
+async def _verifica_attivita_rimovibile(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, attivita_id: int
+) -> int:
+    """Chi indica un'attività non sua lo scopre al primo passo del wizard."""
+    e_admin = get_roles(context).is_admin(update.effective_user.id)
+    with db(context) as conn:
+        controlli.verifica_attivita_rimovibile(
+            conn, attivita_id, update.effective_user.id, e_admin
+        )
+    return attivita_id
+
+
 async def _verifica_attivita_moderabile(
     update: Update, context: ContextTypes.DEFAULT_TYPE, attivita_id: int
 ) -> int:
@@ -89,15 +101,16 @@ async def _verifica_attivita_moderabile(
 
 
 PRECONDIZIONI: dict[str, Precondizione] = {
-    "richiedi": _pre_richiedi,
-    "attivita": _pre_attivita,
+    "richiedi_cittadinanza": _pre_richiedi,
+    "registra_attivita": _pre_attivita,
 }
 
 VERIFICHE_CAMPO: dict[tuple[str, str], Verifica] = {
-    ("inserisci", "telegram_id"): _verifica_inserisci,
-    ("rimuovi", "cittadino"): _verifica_rimuovi,
+    ("inserisci_cittadino", "telegram_id"): _verifica_inserisci,
+    ("rimuovi_cittadino", "cittadino"): _verifica_rimuovi,
     ("aggiungi_admin", "utente"): _verifica_aggiungi_admin,
     ("rimuovi_admin", "utente"): _verifica_rimuovi_admin,
-    ("attivita", "nome_attivita"): _verifica_nome_attivita,
+    ("registra_attivita", "nome_attivita"): _verifica_nome_attivita,
     ("modera_attivita", "attivita"): _verifica_attivita_moderabile,
+    ("rimuovi_attivita", "attivita"): _verifica_attivita_rimovibile,
 }

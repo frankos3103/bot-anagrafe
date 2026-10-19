@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS richieste (
 # indice unico può mancare sui registri preesistenti con ID duplicati (vedi
 # init_db). Con PRAGMA foreign_keys = ON una FK verso una colonna non unica fa
 # fallire ogni INSERT con «foreign key mismatch», e senza ON DELETE bloccherebbe
-# /rimuovi per i cittadini con attività. Il vincolo di cittadinanza è applicato
+# /rimuovi_cittadino per i cittadini con attività. Il vincolo di cittadinanza è applicato
 # in controlli.precondizione_attivita, come già accade per la tabella richieste.
 SCHEMA_ATTIVITA = """
 CREATE TABLE IF NOT EXISTS attivita (
@@ -118,7 +118,7 @@ def init_db(db_path: Path | str) -> None:
             logger.warning(
                 "Impossibile creare l'indice unico su cittadini.telegram_id: "
                 "nel registro esistono ID Telegram duplicati. Rimuovili con "
-                "/rimuovi per attivare la protezione contro i doppioni."
+                "/rimuovi_cittadino per attivare la protezione contro i doppioni."
             )
 
         conn.execute(
