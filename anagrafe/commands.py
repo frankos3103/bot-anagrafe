@@ -122,6 +122,9 @@ class Comando:
     # Il comando si completa con un allegato invece che col wizard: vedi
     # avvia_wizard(). Dichiararlo qui evita di cablarne il nome negli handler.
     attende_allegato: bool = False
+    # Raccolti i dati, esegue senza chiedere conferma. Per un export non c'è
+    # nulla da confermare: il riepilogo sarebbe solo un click in più.
+    senza_conferma: bool = False
 
     @property
     def label(self) -> str:
@@ -157,10 +160,32 @@ ETICHETTE_TIPOLOGIA: dict[str, str] = {
 EMOJI_TIPOLOGIA: dict[str, str] = {o.chiave: o.emoji for o in TIPOLOGIE_ATTIVITA}
 
 
+# I formati in cui si può scaricare un registro. Il CSV è pensato per essere
+# riletto dall'import: le intestazioni sono quelle che csv_import riconosce.
+FORMATO_MD = "md"
+FORMATO_CSV = "csv"
+
+FORMATI_EXPORT: tuple[Opzione, ...] = (
+    Opzione(FORMATO_MD, "Markdown", "📝"),
+    Opzione(FORMATO_CSV, "CSV", "📊"),
+)
+
+ETICHETTE_FORMATO: dict[str, str] = {o.chiave: o.etichetta for o in FORMATI_EXPORT}
+
+
 def etichetta_tipologia(chiave: str) -> str:
     """Il nome pubblico di una tipologia; la chiave grezza se è sconosciuta."""
     return ETICHETTE_TIPOLOGIA.get(chiave, str(chiave))
 
+
+_CAMPO_FORMATO = Campo(
+    "formato",
+    "Formato",
+    "In che formato vuoi il file?",
+    lambda v: valida_scelta(v, ETICHETTE_FORMATO, "Il formato"),
+    opzioni=FORMATI_EXPORT,
+    per_riga=2,
+)
 
 _CAMPO_NOME = Campo(
     "nome", "Nome", "Qual è il nome?", lambda v: valida_nome(v, "Il nome")
@@ -213,9 +238,12 @@ COMMANDS: tuple[Comando, ...] = (
         sezione="cittadini",
         ruolo=Role.PUBBLICO,
         emoji="📤",
-        descrizione="Esporta il registro come file Markdown",
-        uso="/esporta_cittadini",
+        descrizione="Esporta il registro dei cittadini (Markdown o CSV)",
+        uso="/esporta_cittadini [md | csv]",
+        esempio="/esporta_cittadini csv",
         etichetta_menu="Esporta",
+        campi=(_CAMPO_FORMATO,),
+        senza_conferma=True,
         nel_menu_telegram=True,
     ),
     Comando(
@@ -323,6 +351,19 @@ COMMANDS: tuple[Comando, ...] = (
         nel_menu_telegram=True,
     ),
     Comando(
+        nome="esporta_attivita",
+        sezione="attivita",
+        ruolo=Role.PUBBLICO,
+        emoji="📤",
+        descrizione="Esporta il Registro delle Attività (Markdown o CSV)",
+        uso="/esporta_attivita [md | csv]",
+        esempio="/esporta_attivita csv",
+        etichetta_menu="Esporta",
+        campi=(_CAMPO_FORMATO,),
+        senza_conferma=True,
+        nel_menu_telegram=True,
+    ),
+    Comando(
         nome="inserisci_cittadino",
         sezione="cittadini",
         ruolo=Role.ADMIN,
@@ -388,6 +429,17 @@ COMMANDS: tuple[Comando, ...] = (
         uso="/importa_cittadini (allegando un file .csv)",
         esempio="invia il file .csv con didascalia /importa_cittadini",
         etichetta_menu="Importa CSV",
+    ),
+    Comando(
+        nome="importa_attivita",
+        sezione="attivita",
+        ruolo=Role.ADMIN,
+        emoji="📥",
+        descrizione="Importa più attività da un file CSV",
+        uso="/importa_attivita (allegando un file .csv)",
+        esempio="invia il file .csv con didascalia /importa_attivita",
+        etichetta_menu="Importa CSV",
+        attende_allegato=True,
     ),
     Comando(
         nome="modera_attivita",

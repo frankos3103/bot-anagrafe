@@ -1,61 +1,158 @@
-"""Import del registro da un file CSV allegato in chat."""
+"""Import dei registri da un file CSV allegato in chat.
+
+Due registri si importano allo stesso modo — l'utente manda un file, il bot lo
+scarica e lo passa al parser — ma con colonne e regole diverse. Le differenze
+stanno tutte nella tabella IMPORTAZIONI, così il flusso dell'allegato è scritto
+una volta sola e aggiungere un terzo registro non lo tocca.
+"""
 
 from __future__ import annotations
 
 import logging
+import sqlite3
+from dataclasses import dataclass
+from typing import Callable
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from .. import csv_attivita, csv_import
 from ..commands import render_uso, trova_comando
-from ..csv_import import importa_da_bytes, render_esito
 from ..logbook import fmt_utente, send_log
 from ..roles import Role
 from .common import db, richiede, rispondi, ruolo_utente
 
 logger = logging.getLogger(__name__)
 
-# Chiave in user_data: il menu la imposta per dire «il prossimo file è un import».
+# Chiave in user_data: il menu la imposta col nome del comando di import, per
+# dire «il prossimo file è un import, e di questo registro».
 ATTESA_CSV = "attesa_csv"
-
-# Il nome del comando sta qui una volta sola: lo citano le istruzioni, il
-# riconoscimento della didascalia e il messaggio d'uso.
-COMANDO = "importa_cittadini"
 
 DIMENSIONE_MASSIMA = 2 * 1024 * 1024  # 2 MB
 
-ISTRUZIONI = (
+
+ISTRUZIONI_CITTADINI = (
     "📥 Import cittadini da CSV\n\n"
-    f"Invia un file .csv allegandolo a questa chat con didascalia /{COMANDO}.\n\n"
+    "Invia un file .csv allegandolo a questa chat con didascalia "
+    "/importa_cittadini.\n\n"
     "Colonne attese (l'intestazione può usare nomi equivalenti):\n"
-    "  Telegram ID, Username, Nome, Cognome\n\n"
+    "  ID Telegram, Username, Nome, Cognome\n\n"
     "Esempio:\n"
-    "  Telegram ID,Username,Nome,Cognome\n"
+    "  ID Telegram,Username,Nome,Cognome\n"
     "  123456789,@mariorossi,Mario,Rossi\n\n"
     "• Se il file non ha intestazione, le colonne sono lette in quell'ordine.\n"
     "• I cittadini già registrati vengono saltati, non duplicati.\n"
-    "• Le righe non valide vengono elencate nel resoconto finale."
+    "• Le righe non valide vengono elencate nel resoconto finale.\n"
+    "• Il file prodotto da /esporta_cittadini in formato CSV si reimporta così "
+    "com'è."
+)
+
+ISTRUZIONI_ATTIVITA = (
+    "📥 Import attività da CSV\n\n"
+    "Invia un file .csv allegandolo a questa chat con didascalia "
+    "/importa_attivita.\n\n"
+    "Colonne attese (l'intestazione può usare nomi equivalenti):\n"
+    "  Nome, Tipologia, Descrizione, Contatto, Proprietario\n\n"
+    "Esempio:\n"
+    "  Nome,Tipologia,Descrizione,Contatto,Proprietario\n"
+    "  Pizzeria Da Mario,Attività Privata,Pizza al taglio,@pizzeria,123456789\n\n"
+    "• La tipologia è Organizzazione, Associazione o Attività Privata.\n"
+    "• Il proprietario si indica con l'ID Telegram, con #ID cittadino oppure "
+    "con @username, e **deve essere un cittadino iscritto**.\n"
+    "• Il contatto è facoltativo.\n"
+    "• Un proprietario non può avere due attività attive con lo stesso nome.\n"
+    "• Le attività importate non vengono pubblicate sulla Gazzetta Ciompista.\n"
+    "• Il file prodotto da /esporta_attivita in formato CSV si reimporta così "
+    "com'è."
 )
 
 
+@dataclass(frozen=True)
+class Importazione:
+    """Tutto ciò che distingue l'import di un registro dall'altro."""
+
+    comando: str
+    etichetta: str
+    istruzioni: str
+    importa: Callable[[sqlite3.Connection, bytes], object]
+    render: Callable[[object], str]
+    riuscite: Callable[[object], int]
+    riassunto: Callable[[object], str]
+
+
+IMPORTAZIONI: dict[str, Importazione] = {
+    "importa_cittadini": Importazione(
+        comando="importa_cittadini",
+        etichetta="cittadini",
+        istruzioni=ISTRUZIONI_CITTADINI,
+        importa=csv_import.importa_da_bytes,
+        render=csv_import.render_esito,
+        riuscite=lambda e: len(e.inseriti),
+        riassunto=lambda e: (
+            f"Inseriti: {len(e.inseriti)} — saltati: {len(e.saltati)} — "
+            f"non validi: {len(e.scartate)}"
+        ),
+    ),
+    "importa_attivita": Importazione(
+        comando="importa_attivita",
+        etichetta="attività",
+        istruzioni=ISTRUZIONI_ATTIVITA,
+        importa=csv_attivita.importa_da_bytes,
+        render=csv_attivita.render_esito,
+        riuscite=lambda e: len(e.iscritte),
+        riassunto=lambda e: (
+            f"Iscritte: {len(e.iscritte)} — saltate: {len(e.saltate)} — "
+            f"non valide: {len(e.scartate)}"
+        ),
+    ),
+}
+
+
+def istruzioni(nome_comando: str) -> str:
+    """Il testo che spiega come si fa quell'import. Lo usa anche il wizard."""
+    voce = IMPORTAZIONI.get(nome_comando)
+    return voce.istruzioni if voce is not None else ""
+
+
+async def _chiedi_file(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, voce: Importazione
+) -> None:
+    context.user_data[ATTESA_CSV] = voce.comando
+    await rispondi(update, voce.istruzioni)
+
+
 @richiede(Role.ADMIN)
-async def cmd_importa_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/importa_cittadini senza allegato: spiega come si fa e si mette in attesa del file."""
-    context.user_data[ATTESA_CSV] = True
-    await rispondi(update, ISTRUZIONI)
+async def cmd_importa_cittadini(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Spiega come si fa e si mette in attesa del file."""
+    await _chiedi_file(update, context, IMPORTAZIONI["importa_cittadini"])
 
 
-def _e_un_import(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Questo documento è destinato a noi?
+@richiede(Role.ADMIN)
+async def cmd_importa_attivita(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Spiega come si fa e si mette in attesa del file."""
+    await _chiedi_file(update, context, IMPORTAZIONI["importa_attivita"])
 
-    Lo è se la didascalia è /importa_cittadini oppure se l'utente ha appena chiesto di
-    importare (da /importa_cittadini o dalla pulsantiera).
+
+def _quale_import(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> Importazione | None:
+    """Di quale registro è questo documento? None se non è un import.
+
+    Lo dice la didascalia, oppure l'attesa impostata da chi ha appena chiesto
+    di importare (dal comando o dalla pulsantiera).
     """
     didascalia = (update.effective_message.caption or "").strip().lower()
-    if didascalia.startswith(f"/{COMANDO}"):
-        return True
+    for voce in IMPORTAZIONI.values():
+        if didascalia.startswith(f"/{voce.comando}"):
+            return voce
+
     # Senza utente (es. post di un canale) user_data è None.
-    return bool(context.user_data and context.user_data.get(ATTESA_CSV))
+    atteso = context.user_data.get(ATTESA_CSV) if context.user_data else None
+    return IMPORTAZIONI.get(atteso) if atteso else None
 
 
 async def on_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -63,10 +160,13 @@ async def on_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     messaggio = update.effective_message
     if messaggio is None or messaggio.document is None:
         return
-    if not _e_un_import(update, context):
+
+    voce = _quale_import(update, context)
+    if voce is None:
         return
 
-    context.user_data.pop(ATTESA_CSV, None)
+    if context.user_data is not None:
+        context.user_data.pop(ATTESA_CSV, None)
 
     if ruolo_utente(update, context) < Role.ADMIN:
         await rispondi(update, "⛔ Solo un amministratore può importare il registro.")
@@ -76,11 +176,11 @@ async def on_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     nome_file = (documento.file_name or "").lower()
 
     if not nome_file.endswith(".csv"):
-        comando = trova_comando(COMANDO)
         await rispondi(
             update,
             "⚠️ Serve un file con estensione .csv "
-            f"(ricevuto «{documento.file_name}»).\n\n{render_uso(comando)}",
+            f"(ricevuto «{documento.file_name}»).\n\n"
+            f"{render_uso(trova_comando(voce.comando))}",
         )
         return
 
@@ -103,16 +203,15 @@ async def on_documento(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     with db(context) as conn:
-        esito = importa_da_bytes(conn, dati)
+        esito = voce.importa(conn, dati)
 
-    await rispondi(update, render_esito(esito))
+    await rispondi(update, voce.render(esito))
 
-    if esito.inseriti:
+    if voce.riuscite(esito):
         await send_log(
             context,
-            f"📥 *Import CSV*\n"
+            f"📥 *Import CSV* — {voce.etichetta}\n"
             f"Da: {fmt_utente(update.effective_user)}\n"
             f"File: {documento.file_name}\n"
-            f"Inseriti: {len(esito.inseriti)} — saltati: {len(esito.saltati)} — "
-            f"non validi: {len(esito.scartate)}",
+            f"{voce.riassunto(esito)}",
         )

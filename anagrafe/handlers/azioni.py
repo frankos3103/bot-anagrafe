@@ -16,11 +16,11 @@ from telegram.ext import ContextTypes
 
 from .. import controlli, repository
 from ..commands import render_help
+from ..esportazione import FORMATO_PREDEFINITO, esporta_cittadini
 from ..formatting import (
     format_row,
     riga_elenco,
     spezza_in_blocchi,
-    tabella_markdown,
     username_o_placeholder,
 )
 from ..logbook import fmt_username, fmt_utente, send_log
@@ -28,6 +28,7 @@ from ..roles import ETICHETTE_RUOLO, Role
 from ..validators import ErroreValidazione
 from .attivita import (
     azione_elenco_attivita,
+    azione_esporta_attivita,
     azione_modera_attivita,
     azione_registra_attivita,
     azione_rimuovi_attivita,
@@ -62,6 +63,14 @@ async def azione_elenco_cittadini(update: Update, context: ContextTypes.DEFAULT_
         await rispondi(update, blocco, parse_mode="MarkdownV2")
 
 
+async def _invia_export(update: Update, documento, didascalia: str) -> None:
+    """Allega il file prodotto da anagrafe.esportazione."""
+    allegato = InputFile(io.BytesIO(documento.contenuto), filename=documento.nome_file)
+    await update.effective_message.reply_document(
+        document=allegato, caption=didascalia
+    )
+
+
 async def azione_esporta_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori) -> None:
     with db(context) as conn:
         righe = repository.list_citizens(conn, ordine="citizen_id")
@@ -70,11 +79,11 @@ async def azione_esporta_cittadini(update: Update, context: ContextTypes.DEFAULT
         await rispondi(update, "Il registro è vuoto.")
         return
 
-    contenuto = tabella_markdown(righe, len(righe)).encode("utf-8")
-    documento = InputFile(io.BytesIO(contenuto), filename="registro_cittadini.md")
-    await update.effective_message.reply_document(
-        document=documento,
-        caption=f"Registro cittadini — {len(righe)} cittadini totali.",
+    formato = valori.get("formato") or FORMATO_PREDEFINITO
+    await _invia_export(
+        update,
+        esporta_cittadini(righe, formato),
+        f"Registro cittadini — {len(righe)} cittadini totali.",
     )
 
 
@@ -364,6 +373,7 @@ AZIONI = {
     # nel dict, che è quello che il wizard di /menu esegue alla conferma.
     "registra_attivita": azione_registra_attivita,
     "elenco_attivita": azione_elenco_attivita,
+    "esporta_attivita": azione_esporta_attivita,
     "rimuovi_attivita": azione_rimuovi_attivita,
     "modera_attivita": azione_modera_attivita,
     "elenco_admin": azione_elenco_admin,

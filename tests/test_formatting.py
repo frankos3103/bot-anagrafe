@@ -16,7 +16,6 @@ from anagrafe.formatting import (
     riga_elenco,
     scheda_moderazione,
     spezza_in_blocchi,
-    tabella_markdown,
     username_o_placeholder,
     username_senza_tag,
 )
@@ -80,7 +79,6 @@ def test_il_cognome_negli_elenchi_e_sempre_maiuscolo(cognome):
     dati = riga(nome="Giovanni", cognome=cognome)
     assert "*Giovanni ZACCARIA*" in riga_elenco(dati)
     assert "Giovanni ZACCARIA" in format_row(dati)
-    assert "| Giovanni | ZACCARIA |" in tabella_markdown([dati], 1)
 
 
 def test_cognome_accentato_in_maiuscolo():
@@ -139,23 +137,6 @@ def test_riga_piu_lunga_del_limite_viene_troncata():
     assert len(blocchi) == 1
     assert len(blocchi[0]) <= 100
     assert blocchi[0].endswith("…")
-
-
-# ----------------------------------------------------------------------
-# Esportazione
-# ----------------------------------------------------------------------
-
-def test_tabella_markdown():
-    testo = tabella_markdown([riga(), riga(2, 222, None, "Luigi", "Bianchi")], 2)
-    assert "# Registro Cittadini" in testo
-    assert "Totale cittadini: 2" in testo
-    assert "| 1 | 111 | @mariorossi | Mario | ROSSI |" in testo
-    assert "| 2 | 222 |  | Luigi | BIANCHI |" in testo
-    assert testo.endswith("\n")
-
-
-def test_tabella_markdown_sfugge_le_pipe():
-    assert r"Mario\|Luigi" in tabella_markdown([riga(nome="Mario|Luigi")], 1)
 
 
 # ----------------------------------------------------------------------

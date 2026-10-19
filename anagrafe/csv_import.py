@@ -1,7 +1,13 @@
-"""Import di cittadini da file CSV.
+"""Import da file CSV: cittadini e attività.
 
 Il parsing è completamente separato dalla scrittura su database, così si può
 testare senza toccare né Telegram né SQLite.
+
+I due registri condividono le primitive — decodifica, delimitatore,
+riconoscimento dell'intestazione, righe scartate — e hanno ciascuno il proprio
+«dialetto»: le colonne che riconosce e le regole con cui valida una riga. Le
+intestazioni sono quelle che anagrafe.esportazione scrive, così un registro
+esportato in CSV rientra senza ritocchi.
 """
 
 from __future__ import annotations
@@ -10,6 +16,7 @@ import csv
 import io
 import sqlite3
 from dataclasses import dataclass, field
+from typing import Mapping, Sequence
 
 from . import repository
 from .validators import (
@@ -104,16 +111,30 @@ def _normalizza_intestazione(valore: str) -> str:
     return "".join(ch for ch in str(valore).lower() if ch.isalnum())
 
 
-def _mappa_colonne(riga: list[str]) -> dict[str, int] | None:
-    """Se la riga sembra un'intestazione, restituisce colonna -> indice."""
+def _mappa_colonne_da(
+    riga: list[str],
+    alias: Mapping[str, str],
+    obbligatorie: Sequence[str],
+) -> dict[str, int] | None:
+    """Se la riga sembra un'intestazione, restituisce colonna -> indice.
+
+    Gli alias e le colonne obbligatorie sono parametri perché ogni registro ha
+    il proprio dialetto: «Nome» è il nome di battesimo per i cittadini e la
+    denominazione per le attività.
+    """
     mappa: dict[str, int] = {}
     for indice, cella in enumerate(riga):
-        chiave = ALIAS_COLONNE.get(_normalizza_intestazione(cella))
+        chiave = alias.get(_normalizza_intestazione(cella))
         if chiave and chiave not in mappa:
             mappa[chiave] = indice
-    if all(colonna in mappa for colonna in COLONNE_OBBLIGATORIE):
+    if all(colonna in mappa for colonna in obbligatorie):
         return mappa
     return None
+
+
+def _mappa_colonne(riga: list[str]) -> dict[str, int] | None:
+    """Il dialetto dei cittadini."""
+    return _mappa_colonne_da(riga, ALIAS_COLONNE, COLONNE_OBBLIGATORIE)
 
 
 def _riga_vuota(riga: list[str]) -> bool:

@@ -36,7 +36,7 @@ from ..validators import ErroreValidazione
 from .azioni import AZIONI
 from .common import argomenti, rispondi, ruolo_utente
 from .controlli import PRECONDIZIONI, VERIFICHE_CAMPO
-from .importazione import ATTESA_CSV, ISTRUZIONI
+from .importazione import ATTESA_CSV, istruzioni
 from .scelte import FORNITORI
 
 logger = logging.getLogger(__name__)
@@ -315,6 +315,9 @@ async def _chiedi_campo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     """Invia il prompt del campo corrente, o passa al riepilogo se sono finiti."""
     corrente = _campo_corrente(context)
     if corrente is None:
+        finito = trova_comando(_wizard(context)["comando"])
+        if finito is not None and finito.senza_conferma:
+            return await _esegui(update, context)
         return await _mostra_riepilogo(update, context)
 
     comando, campo = corrente
@@ -550,9 +553,10 @@ async def avvia_wizard(
             return await fine(update, context)
 
     if comando.attende_allegato:
-        # L'import ha bisogno di un allegato: usciamo dal wizard e aspettiamo il file.
-        context.user_data[ATTESA_CSV] = True
-        await rispondi(update, ISTRUZIONI)
+        # L'import ha bisogno di un allegato: usciamo dal wizard e aspettiamo il
+        # file. Si memorizza *quale* import, perché i registri sono più di uno.
+        context.user_data[ATTESA_CSV] = comando.nome
+        await rispondi(update, istruzioni(comando.nome))
         return ConversationHandler.END
 
     if not comando.richiede_input:
@@ -631,10 +635,12 @@ async def on_scelta_comando(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return await avvia_wizard(update, context, nome, mostra_menu_al_termine=True)
 
 
-async def on_conferma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
+async def _esegui(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Esegue il comando del wizard coi valori raccolti e torna alla pulsantiera.
 
+    Ci si arriva dal pulsante «Conferma», oppure direttamente dall'ultimo campo
+    se il comando è dichiarato `senza_conferma`.
+    """
     stato = context.user_data.pop("wizard", None)
     if not stato:
         return await cmd_menu(update, context)
@@ -659,6 +665,11 @@ async def on_conferma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
     await AZIONI[comando.nome](update, context, stato["valori"])
     return await _mostra_menu(update, context)
+
+
+async def on_conferma(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.callback_query.answer()
+    return await _esegui(update, context)
 
 
 async def on_annulla(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

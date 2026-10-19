@@ -26,11 +26,12 @@ from telegram.ext import (
 from . import comandi
 from .attivita import (
     cmd_elenco_attivita,
+    cmd_esporta_attivita,
     cmd_modera_attivita,
     cmd_rimuovi_attivita,
     on_attivita_callback,
 )
-from .importazione import cmd_importa_cittadini, on_documento
+from .importazione import cmd_importa_attivita, cmd_importa_cittadini, on_documento
 from .menu import build_menu_handler
 from .misc import aggiorna_tag, catch_all, on_error
 from .richieste import on_richiesta_callback
@@ -51,6 +52,8 @@ COMANDI = {
     "elenco_admin": comandi.cmd_elenco_admin,
     "elenco_attivita": cmd_elenco_attivita,
     "rimuovi_attivita": cmd_rimuovi_attivita,
+    "esporta_attivita": cmd_esporta_attivita,
+    "importa_attivita": cmd_importa_attivita,
     "modera_attivita": cmd_modera_attivita,
     # «attivita» NON va qui: ha wizard_diretto=True, quindi sta negli
     # entry_points di build_menu_handler(). La ConversationHandler è

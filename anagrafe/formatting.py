@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from .commands import EMOJI_TIPOLOGIA, etichetta_tipologia
 
@@ -122,29 +122,6 @@ def spezza_in_blocchi(
 
     return blocchi
 
-
-def tabella_markdown(righe: Iterable[Mapping], totale: int) -> str:
-    """Documento Markdown completo prodotto da /esporta_cittadini."""
-    linee = [
-        "# Registro Cittadini",
-        "",
-        f"Totale cittadini: {totale}",
-        "",
-        "| ID cittadino | ID Telegram | Username | Nome | Cognome |",
-        "|---|---|---|---|---|",
-    ]
-    for row in righe:
-        username = f"@{row['username']}" if row["username"] else ""
-        linee.append(
-            "| {cid} | {tid} | {username} | {nome} | {cognome} |".format(
-                cid=row["citizen_id"],
-                tid=row["telegram_id"],
-                username=escape_tabella(username),
-                nome=escape_tabella(row["nome"]),
-                cognome=escape_tabella(cognome_elenco(row["cognome"])),
-            )
-        )
-    return "\n".join(linee) + "\n"
 
 # ----------------------------------------------------------------------
 # Registro delle attività

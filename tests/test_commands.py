@@ -421,3 +421,63 @@ def test_nessun_comando_chiede_piu_un_id_a_mano():
         ("aggiungi_admin", "utente"),
         ("rimuovi_admin", "utente"),
     } <= a_scelte
+
+
+# ----------------------------------------------------------------------
+# Export e import
+# ----------------------------------------------------------------------
+
+def test_i_comandi_con_allegato_hanno_una_voce_di_import():
+    """Senza, il bot chiederebbe un file che poi non saprebbe dove mettere."""
+    from anagrafe.handlers.importazione import IMPORTAZIONI
+
+    con_allegato = {c.nome for c in COMMANDS if c.attende_allegato}
+    assert con_allegato
+    assert con_allegato == set(IMPORTAZIONI)
+
+
+def test_ogni_voce_di_import_nomina_un_comando_con_allegato():
+    from anagrafe.handlers.importazione import IMPORTAZIONI
+
+    for nome, voce in IMPORTAZIONI.items():
+        comando = trova_comando(nome)
+        assert comando is not None, nome
+        assert comando.attende_allegato, nome
+        assert voce.comando == nome
+        assert voce.istruzioni.strip()
+
+
+def test_un_comando_con_allegato_non_chiede_dati_al_wizard():
+    """L'allegato e il wizard sono due modi alternativi di completare."""
+    for comando in COMMANDS:
+        if comando.attende_allegato:
+            assert not comando.richiede_input, comando.nome
+
+
+def test_senza_conferma_serve_solo_a_chi_raccoglie_dati():
+    for comando in COMMANDS:
+        if comando.senza_conferma:
+            assert comando.richiede_input, comando.nome
+
+
+def test_gli_export_chiedono_il_formato_e_non_la_conferma():
+    """Un export è di sola lettura: il riepilogo sarebbe un click in più."""
+    for nome in ("esporta_cittadini", "esporta_attivita"):
+        comando = trova_comando(nome)
+        assert comando is not None, nome
+        assert [c.chiave for c in comando.campi] == ["formato"]
+        assert comando.senza_conferma, nome
+        assert comando.campi[0].a_pulsanti
+
+
+def test_i_due_formati_sono_md_e_csv():
+    from anagrafe.commands import FORMATI_EXPORT
+
+    assert {o.chiave for o in FORMATI_EXPORT} == {"md", "csv"}
+
+
+def test_i_registri_hanno_tutti_export_e_import():
+    """Issue #46: le attività devono avere lo stesso corredo dei cittadini."""
+    nomi = {c.nome for c in COMMANDS}
+    assert {"esporta_cittadini", "importa_cittadini"} <= nomi
+    assert {"esporta_attivita", "importa_attivita"} <= nomi

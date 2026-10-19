@@ -35,7 +35,10 @@ Pubblico delle Attività, e registra ogni modifica su un canale Telegram di log.
 ## Funzionalità
 
 - **Registro dei cittadini** consultabile da chiunque (`/elenco_cittadini`, `/cerca_cittadino`) ed
-  esportabile in Markdown (`/esporta_cittadini`).
+  esportabile in **Markdown o CSV** (`/esporta_cittadini`).
+- **Import ed export per entrambi i registri**: cittadini e attività si
+  scaricano e si ricaricano con gli stessi due formati. Il CSV prodotto
+  dall'export si reimporta così com'è.
 - **Richieste di cittadinanza** (`/richiedi_cittadinanza`): ogni amministratore riceve una
   notifica in privato con i pulsanti *Accetta* / *Rifiuta*. Quando uno decide,
   la notifica si aggiorna per tutti gli altri e il richiedente viene avvisato.
@@ -138,12 +141,13 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | `/help` | Elenco dei comandi che *tu* puoi usare. |
 | `/menu` | Apre la pulsantiera guidata. |
 | `/elenco_cittadini` | Elenco completo dei cittadini (nome, cognome, username). |
-| `/esporta_cittadini` | Invia il registro come file Markdown. |
+| `/esporta_cittadini [md \| csv]` | Invia il registro dei cittadini come file. Senza argomento è Markdown. |
 | `/cerca_cittadino <testo>` | Cerca per nome e/o cognome (in qualunque ordine), `@username`, `#ID` o ID Telegram. Senza risultati esatti propone i nomi più simili. |
 | `/richiedi_cittadinanza <nome>, <cognome>` | Invia una richiesta di cittadinanza. |
 | `/registra_attivita` | Iscrive una tua attività al Registro Pubblico. Procedura guidata a passi; richiede la cittadinanza. |
 | `/elenco_attivita` | Elenco delle attività iscritte al Registro Pubblico. |
 | `/rimuovi_attivita <ID_attività>` | Ritira una tua attività dal Registro. Un amministratore può usarlo su qualunque attività. |
+| `/esporta_attivita [md \| csv]` | Invia il Registro delle Attività come file. Contiene le attività attive. |
 
 ### Amministratori
 
@@ -153,6 +157,7 @@ Al primo avvio il database viene creato automaticamente. Per fermare il bot:
 | `/rimuovi_cittadino <ID_cittadino | ID_telegram | @username>` | Rimuove il cittadino indicato per ID cittadino (il numero dopo `#`), ID Telegram o tag. |
 | `/tagga_cittadini` | Menziona tutti i cittadini che hanno uno username. |
 | `/importa_cittadini` | Importa più cittadini da un file CSV (vedi sotto). |
+| `/importa_attivita` | Importa più attività da un file CSV (vedi sotto). |
 | `/modera_attivita <ID_attività>` | Rimanda la scheda di un'attività con i pulsanti *Rifiuta* / *Elimina*, utile se la notifica è andata perduta. |
 
 ### Root
@@ -236,18 +241,66 @@ pulsantiera è stata disegnata.
 
 ---
 
+## Export: Markdown o CSV
+
+`/esporta_cittadini` e `/esporta_attivita` chiedono in che formato vuoi il file,
+con due pulsanti:
+
+- **📝 Markdown** — una tabella da leggere, col cognome in maiuscolo come in
+  tutti gli elenchi del bot;
+- **📊 CSV** — un file di scambio, da aprire in un foglio di calcolo o da
+  **ricaricare con l'import**.
+
+Dalla pulsantiera l'export parte appena scegli il formato: non c'è una conferma
+da dare, perché non modifica nulla. Dai comandi puoi anche scrivere il formato
+di seguito (`/esporta_cittadini csv`); senza argomento è Markdown, come è
+sempre stato.
+
+Il CSV usa le stesse intestazioni che l'import riconosce, quindi **un registro
+esportato in CSV si reimporta senza ritoccarlo**. È l'invariante che lega i due
+comandi, e due test la verificano facendo il giro completo. Il file porta il BOM
+UTF-8, così Excel non storpia i nomi accentati, e nel CSV i dati non vengono
+alterati (il cognome resta come è scritto nel registro).
+
+L'export delle attività contiene le sole attività **attive**: è quello che il
+pubblico vede, ed è anche ciò che l'import riaccetta.
+
+---
+
 ## Import da CSV
 
-Invia il file `.csv` al bot **allegandolo in chat con didascalia `/importa_cittadini`**
-(oppure premi *Importa CSV* nel menu e poi manda il file).
+Invia il file `.csv` al bot **allegandolo in chat con didascalia
+`/importa_cittadini`** o **`/importa_attivita`** (oppure premi *Importa CSV*
+nella sezione giusta del menu e poi manda il file). È la didascalia, o il
+comando che hai appena premuto, a dire al bot in quale registro mettere le
+righe.
 
-Colonne attese:
+Colonne attese per i **cittadini**:
 
 ```csv
-Telegram ID,Username,Nome,Cognome
+ID Telegram,Username,Nome,Cognome
 123456789,@mariorossi,Mario,Rossi
 987654321,,Anna,Verdi
 ```
+
+Colonne attese per le **attività**:
+
+```csv
+Nome,Tipologia,Descrizione,Contatto,Proprietario
+Pizzeria Da Mario,Attività Privata,Pizza al taglio,@pizzeria,123456789
+Circolo dei Ciompi,Associazione,Letture collettive,,#3
+```
+
+Per le attività valgono le stesse due regole dell'iscrizione singola: il
+**proprietario deve essere un cittadino** già iscritto (si indica con l'ID
+Telegram, `#ID cittadino` o `@username`), e lo stesso proprietario non può
+avere due attività attive con lo stesso nome. Le righe che violano una delle
+due vengono **saltate con il motivo**, non importate a metà.
+
+Le attività importate **non vengono pubblicate sulla Gazzetta Ciompista** e non
+generano notifiche al Ministero: un file da cinquanta righe produrrebbe
+cinquanta post e cinquanta messaggi per amministratore, e Telegram limita gli
+invii. Il resoconto lo dice esplicitamente.
 
 Il parser è volutamente tollerante:
 
@@ -260,10 +313,10 @@ Il parser è volutamente tollerante:
 - ignora le righe completamente vuote, comprese quelle tipo `,,,` che i fogli
   di calcolo mettono spesso in cima al file.
 
-Al termine ricevi un resoconto con quanti cittadini sono stati **inseriti**,
-quanti **saltati** perché già presenti, e l'elenco delle **righe non valide**
-con il numero di riga e il motivo. I cittadini già registrati non vengono mai
-duplicati, quindi rilanciare lo stesso import è innocuo.
+Al termine ricevi un resoconto con quante righe sono state **inserite**, quante
+**saltate** e l'elenco delle **righe non valide** con il numero di riga e il
+motivo. Né i cittadini già registrati né le attività omonime vengono duplicati,
+quindi rilanciare lo stesso import è innocuo.
 
 Limiti: solo file con estensione `.csv`, massimo 2 MB.
 
@@ -422,7 +475,9 @@ anagrafe/
 ├── validators.py      validazione degli argomenti
 ├── controlli.py       controlli fail-fast e risoluzione di #ID / @tag
 ├── formatting.py      escape e impaginazione dei messaggi
-├── csv_import.py      parsing e import dei file CSV
+├── csv_import.py      primitive CSV e import dei cittadini
+├── csv_attivita.py    import delle attività da CSV
+├── esportazione.py    produzione dei file di export (Markdown e CSV)
 ├── logbook.py         log sul canale Telegram
 └── handlers/
     ├── azioni.py      le azioni, condivise fra comandi e pulsantiera
@@ -450,7 +505,8 @@ da scegliere; `sezione="..."` decide in quale area della pulsantiera compare il
 pulsante; un comando con `wizard_diretto=True` entra nel proprio wizard appena
 digitato e va negli `entry_points` di `build_menu_handler()`, **non** nel
 dizionario `COMANDI`; `attende_allegato=True` lo fa uscire dal wizard per
-aspettare un file.
+aspettare un file (e richiede una voce in `IMPORTAZIONI`);
+`senza_conferma=True` esegue appena i dati sono raccolti, senza riepilogo.
 
 Un test (`test_nessuna_chiave_orfana_nei_dizionari_dei_comandi`) verifica che
 ogni chiave di `COMANDI`, `AZIONI`, `PRECONDIZIONI` e `VERIFICHE_CAMPO` nomini

@@ -9,14 +9,21 @@ successivo, non preventivo.
 
 from __future__ import annotations
 
+import io
 import logging
 import sqlite3
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputFile, Update
 from telegram.ext import ContextTypes
 
 from .. import controlli, repository
-from ..commands import etichetta_tipologia, render_uso, trova_comando
+from ..commands import (
+    ETICHETTE_FORMATO,
+    etichetta_tipologia,
+    render_uso,
+    trova_comando,
+)
+from ..esportazione import FORMATO_PREDEFINITO, esporta_attivita
 from ..formatting import (
     escape_markdown_legacy,
     riga_attivita,
@@ -25,7 +32,7 @@ from ..formatting import (
 )
 from ..logbook import fmt_username, fmt_utente, send_log
 from ..roles import Role
-from ..validators import ErroreValidazione, valida_attivita_id
+from ..validators import ErroreValidazione, valida_attivita_id, valida_scelta
 from .common import argomenti, db, get_roles, richiede, rispondi
 from .gazzetta import POST_CANCELLATO, POST_FALLITO, chiudi_post, pubblica_attivita
 from .notifiche import aggiorna_copie_notifica, avvisa_in_privato, invia_notifiche_admin
@@ -184,6 +191,44 @@ async def azione_elenco_attivita(
     intestazione = f"📋 *Registro Pubblico delle Attività* \\({len(righe)}\\)"
     for blocco in spezza_in_blocchi([riga_attivita(r) for r in righe], intestazione):
         await rispondi(update, blocco, parse_mode="MarkdownV2")
+
+
+async def azione_esporta_attivita(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, valori: Valori
+) -> None:
+    """Esporta le attività attive: il file CSV si reimporta con /importa_attivita."""
+    with db(context) as conn:
+        righe = repository.list_attivita_attive(conn)
+
+    if not righe:
+        await rispondi(update, "Il Registro Pubblico delle Attività è vuoto.")
+        return
+
+    formato = valori.get("formato") or FORMATO_PREDEFINITO
+    documento = esporta_attivita(righe, formato)
+    allegato = InputFile(io.BytesIO(documento.contenuto), filename=documento.nome_file)
+    await update.effective_message.reply_document(
+        document=allegato,
+        caption=f"Registro delle Attività — {len(righe)} attività attive.",
+    )
+
+
+async def cmd_esporta_attivita(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    try:
+        formato = (
+            valida_scelta(argomenti(update), ETICHETTE_FORMATO, "Il formato")
+            if argomenti(update)
+            else FORMATO_PREDEFINITO
+        )
+    except ErroreValidazione as exc:
+        await rispondi(
+            update,
+            f"⚠️ {exc}\n\n{render_uso(trova_comando('esporta_attivita'))}",
+        )
+        return
+    await azione_esporta_attivita(update, context, {"formato": formato})
 
 
 # ----------------------------------------------------------------------

@@ -5,9 +5,16 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from ..commands import render_help, render_uso, trova_comando
+from ..commands import (
+    ETICHETTE_FORMATO,
+    render_help,
+    render_uso,
+    trova_comando,
+)
+from ..esportazione import FORMATO_PREDEFINITO
 from ..validators import (
     ErroreValidazione,
+    valida_scelta,
     parse_inserisci,
     parse_richiedi,
     valida_ricerca,
@@ -58,8 +65,26 @@ async def cmd_elenco_cittadini(update: Update, context: ContextTypes.DEFAULT_TYP
     await azione_elenco_cittadini(update, context, {})
 
 
+def _formato(update: Update) -> dict:
+    """Legge il formato dall'argomento del comando, se c'è.
+
+    Senza argomento si usa il Markdown, che è ciò che l'export produceva prima
+    che i formati fossero due: «/esporta_cittadini» continua a funzionare come
+    ha sempre funzionato.
+    """
+    grezzo = argomenti(update)
+    if not grezzo:
+        return {"formato": FORMATO_PREDEFINITO}
+    return {"formato": valida_scelta(grezzo, ETICHETTE_FORMATO, "Il formato")}
+
+
 async def cmd_esporta_cittadini(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await azione_esporta_cittadini(update, context, {})
+    try:
+        valori = _formato(update)
+    except ErroreValidazione as exc:
+        await _errore_uso(update, "esporta_cittadini", exc)
+        return
+    await azione_esporta_cittadini(update, context, valori)
 
 
 async def cmd_cerca_cittadino(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
